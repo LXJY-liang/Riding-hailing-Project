@@ -1,0 +1,26 @@
+{
+  "sample_count": 381568,
+  "quantile_count": 101,
+  "prediction_path": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/4 tauijt预测/output/prediction/tauijt_valid_predictions.parquet",
+  "best_model": {
+    "best_epoch": 1,
+    "best_global_step": 13333,
+    "best_valid_loss": 0.11724926380166288
+  },
+  "point_forecast": {
+    "median_mae": 3.347125291824341,
+    "median_rmse": 5.3943963050842285,
+    "median_signed_error": -0.6382466945727789,
+    "actual_above_median_prediction_rate": 0.48913692972156997
+  },
+  "probabilistic_forecast": {
+    "mean_pinball_loss": 1.2165601253509521,
+    "mean_calibration_error": 0.01286876238388424
+  },
+  "prediction_validity": {
+    "missing_prediction_count": 0,
+    "negative_prediction_count": 0,
+    "crossing_pair_count": 0,
+    "crossing_sample_count": 0
+  }
+}

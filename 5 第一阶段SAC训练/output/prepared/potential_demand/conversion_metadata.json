@@ -1,0 +1,10 @@
+[
+  {
+    "split": "valid",
+    "source": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/1 Dit预测/output/prediction/dit_valid_predictions.parquet",
+    "target": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/potential_demand/dit_potential_valid_predictions.parquet",
+    "rows": 230688,
+    "completion_rate": 0.8,
+    "scale_factor": 1.25
+  }
+]

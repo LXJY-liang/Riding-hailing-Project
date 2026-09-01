@@ -1,0 +1,13 @@
+{
+  "rows": 2294865,
+  "regions": 801,
+  "start_times": 2865,
+  "monte_carlo_samples": 64,
+  "horizon_slots": 16,
+  "driver_gamma": 0.95,
+  "proxy_available_rows": 2064177,
+  "proxy_missing_rows": 230688,
+  "oracle_median_mean": 14.43820858001709,
+  "proxy_median_mean": 14.481893539428711,
+  "smoke_start_times": 0
+}

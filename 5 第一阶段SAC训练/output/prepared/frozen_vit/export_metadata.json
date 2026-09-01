@@ -1,0 +1,23 @@
+{
+  "frozen": true,
+  "head": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/4 Vit预训练模型/output/model/best_quantile_head.pt",
+  "scaler": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/4 Vit预训练模型/output/model/scaler.json",
+  "demand_input": "原始成交量Dit的27维log1p摘要",
+  "supply_input": "滚动历史高分位固定容量",
+  "files": [
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-11.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-12.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-13.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-14.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-15.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-16.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-17.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-18.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-19.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-20.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-21.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-22.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-23.npz",
+    "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/5 第一阶段SAC训练/output/prepared/frozen_vit/vit_quantiles_2024-06-24.npz"
+  ]
+}

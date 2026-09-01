@@ -1,0 +1,17 @@
+{
+  "sample_count": 3,
+  "random_seed": 20240921,
+  "sampling_population": "all rows with available_flag=1",
+  "order_level_source": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/1_4 异常订单清洗_保留订单.parquet",
+  "order_level_input_rows": 6050260,
+  "order_level_valid_rows": 6050260,
+  "selected_origin_internal_history_orders": 26004,
+  "contributing_order_rows_exported": 2384,
+  "history_period_rows_exported": 372,
+  "destination_comparison_rows_exported": 2403,
+  "passed_sample_count": 3,
+  "failed_sample_count": 0,
+  "maximum_absolute_probability_difference": 2.647014774037615e-09,
+  "probability_tolerance": 2e-05,
+  "output_directory": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/random_sample_audit"
+}

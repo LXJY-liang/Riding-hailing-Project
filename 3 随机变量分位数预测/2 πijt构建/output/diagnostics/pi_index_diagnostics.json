@@ -1,0 +1,21 @@
+{
+  "active_od_input_rows": 4457825,
+  "active_od_invalid_rows": 0,
+  "history_matrix_nnz": 4457825,
+  "history_total_orders": 5812445,
+  "region_count": 801,
+  "time_count": 2880,
+  "target_origin_time_rows": 2306880,
+  "positive_origin_time_rows": 731013,
+  "panel_total_orders": 5812445,
+  "internal_od_total_orders": 5812445,
+  "excluded_external_destination_orders": 0,
+  "panel_origin_total_mismatch_rows": 0,
+  "panel_origin_total_max_abs_difference": 0,
+  "internal_od_exceeds_panel_rows": 0,
+  "history_matrix_shape": [
+    2306880,
+    801
+  ],
+  "index_directory": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/prepared_index"
+}

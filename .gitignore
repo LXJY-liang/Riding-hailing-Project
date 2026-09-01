@@ -1,0 +1,55 @@
+# Python虚拟环境
+.venv/
+venv/
+
+# PyCharm
+.idea/
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# 大型数据文件
+*.parquet
+*.csv
+*.feather
+*.arrow
+
+# 模型权重
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# HuggingFace缓存
+.cache/
+
+# 日志
+*.log
+
+# Node.js依赖
+node_modules/
+
+# 本地基座模型
+/0 基座模型_Qwen3-4B-Base/
+
+# NumPy数据和大型中间结果
+*.npy
+*.npz
+
+# 环境变量和密钥
+.env
+.env.*
+
+# Codex/临时工具文件
+/node_modules
+/output/
+/inspect_gradebook.mjs
+
+# 本地服务器结果备份
+/服务器结果备份/

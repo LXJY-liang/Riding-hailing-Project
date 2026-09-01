@@ -1,0 +1,28 @@
+{
+  "splits": [
+    "train"
+  ],
+  "episode_files": [
+    "episode_2024-06-11.npz",
+    "episode_2024-06-12.npz",
+    "episode_2024-06-13.npz",
+    "episode_2024-06-14.npz",
+    "episode_2024-06-15.npz",
+    "episode_2024-06-16.npz",
+    "episode_2024-06-17.npz",
+    "episode_2024-06-18.npz",
+    "episode_2024-06-19.npz",
+    "episode_2024-06-20.npz",
+    "episode_2024-06-21.npz",
+    "episode_2024-06-22.npz",
+    "episode_2024-06-23.npz",
+    "episode_2024-06-24.npz"
+  ],
+  "od_rows": 2027087,
+  "observed_orders": 2642525.0,
+  "p_ref_mean": 21.2447509765625,
+  "p_ref_demand_weighted_mean": 22.165325658574165,
+  "baseline_acceptance_od_mean": 0.4289401633666501,
+  "baseline_acceptance_demand_weighted_mean": 0.4302940548423214,
+  "baseline_definition": "1 - F_pe(p_ref); proxy based on completed-trip prices"
+}

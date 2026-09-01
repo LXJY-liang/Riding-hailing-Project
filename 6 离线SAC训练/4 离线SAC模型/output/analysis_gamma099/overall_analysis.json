@@ -1,0 +1,126 @@
+{
+  "data": {
+    "od_rows": 381274,
+    "groups": 68176,
+    "origins": 787,
+    "destinations": 789,
+    "historical_orders": 515531.0,
+    "model_completed_orders": 386304.5390723834,
+    "completion_ratio": 0.74933328756638
+  },
+  "price": {
+    "historical_price_od_mean": 21.274088290265073,
+    "sac_price_od_mean": 18.035698726896978,
+    "historical_price_D_weighted": 22.847971102316706,
+    "sac_price_D_weighted": 19.780697783501175,
+    "sac_price_M_weighted": 18.041591991927508,
+    "change_percent_od_mean": -14.515237716922949,
+    "change_percent_D_weighted": -13.103854378745087,
+    "change_percent_M_weighted": -19.06754266793683,
+    "increase_share_od": 0.1724796340689373,
+    "decrease_share_od": 0.8275203659310627,
+    "ratio_near_lower_bound_share": 0.0009992813567145937,
+    "ratio_near_upper_bound_share": 2.6227857131616634e-05,
+    "price_change_percent_quantiles": {
+      "q01": -46.91686487197876,
+      "q05": -41.276018023490906,
+      "q10": -35.70493936538696,
+      "q25": -25.83818882703781,
+      "q50": -15.271822363138199,
+      "q75": -4.694112949073315,
+      "q90": 6.753815785050397,
+      "q95": 15.328518524765967,
+      "q99": 31.763257145881735
+    },
+    "price_ratio_quantiles": {
+      "q01": 0.5308313512802124,
+      "q05": 0.587239819765091,
+      "q10": 0.6429506063461303,
+      "q25": 0.7416181117296219,
+      "q50": 0.847281776368618,
+      "q75": 0.9530588705092669,
+      "q90": 1.0675381578505039,
+      "q95": 1.1532851852476598,
+      "q99": 1.3176325714588173
+    }
+  },
+  "subsidy": {
+    "subsidized_od_share": 0.25950628681735444,
+    "average_all_od": 1.373578080453246,
+    "average_D_weighted": 1.1088911154979026,
+    "average_M_weighted": 0.7013837993065586,
+    "conditional_average_positive": 5.293043560906087,
+    "conditional_median_positive": 3.6878333095735707,
+    "conditional_quantiles_positive": {
+      "q01": 0.3659971820936171,
+      "q05": 0.6444221706375495,
+      "q10": 0.9086473473108179,
+      "q25": 1.7290715330470787,
+      "q50": 3.6878333095735707,
+      "q75": 7.3939797075716385,
+      "q90": 12.36963589584768,
+      "q95": 15.455608116276636,
+      "q99": 20.43134099040967
+    },
+    "total_spend": 270947.7453039572,
+    "positive_at_or_near_max_share": 0.08645381684404152
+  },
+  "acceptance_and_constraints": {
+    "passenger_acceptance_od_mean": 0.7957401124257096,
+    "passenger_acceptance_D_weighted": 0.7609763040437918,
+    "passenger_violation_rate_od": 0.39940829954311075,
+    "passenger_violation_rate_D_weighted": 0.4773641158339654,
+    "passenger_violation_mean_all": 0.1842894725971349,
+    "passenger_violation_mean_conditional": 0.46140621716660984,
+    "driver_final_acceptance_od_mean": 0.9863257762055196,
+    "driver_final_acceptance_D_weighted": 0.9880348182492901,
+    "driver_violation_rate_od": 0.021968453133442093,
+    "driver_violation_rate_D_weighted": 0.01660423912432036,
+    "driver_violation_mean_conditional": 0.2237343487430519,
+    "hard_infeasible_rate_D_weighted": 0.01660423912432036
+  },
+  "support": {
+    "outside_share_od": 0.9161364268216559,
+    "outside_share_D_weighted": 0.779600062847821,
+    "below_q10_share_od": 0.7648305418150726,
+    "above_q90_share_od": 0.15130588500658318,
+    "mean_signed_distance_outside_ratio": -0.14591991398849527,
+    "raw_support_degenerate_share_od": 0.8277092065024103,
+    "raw_support_degenerate_share_D_weighted": 0.6156836349317499,
+    "outside_proxy_share_od": 0.6724691429260846,
+    "outside_proxy_share_D_weighted": 0.5873128871008727,
+    "below_proxy_q10_share_od": 0.6005917004568893,
+    "above_proxy_q90_share_od": 0.07187744246919538
+  },
+  "profit": {
+    "gross_commission": 1742387.2196433898,
+    "subsidy_spend": 270947.7453039572,
+    "platform_profit": 1471439.4743394328,
+    "profit_per_completed_order": 3.8090141986753183,
+    "negative_margin_od_share_among_positive_volume": 0.10407187830323085,
+    "negative_profit_total": -78948.80642816532,
+    "descriptive_historical_commission_proxy": 2944709.3475871086
+  },
+  "supply": {
+    "binding_rate": 0.0,
+    "zero_model_volume_share": 0.0868928906770459
+  },
+  "correlations_spearman": {
+    "price_change_vs_passenger_acceptance": -0.8590361116873013,
+    "subsidy_vs_driver_final_acceptance": -0.5970815337687739,
+    "price_change_vs_profit": -0.3863882547556972
+  },
+  "training": {
+    "total_collection_steps": 20000,
+    "saved_best_step": 5000,
+    "validation_groups_per_checkpoint": 2000,
+    "validation_od_rows_per_checkpoint": 7503,
+    "critic_loss_median_first_1000": 71.18672561645508,
+    "critic_loss_median_last_1000": 1903.5208129882812,
+    "entropy_alpha_final": 0.2326146066188812,
+    "lambda_passenger_saved_checkpoint": 2.077356286913159,
+    "lambda_driver_saved_checkpoint": 0.0317919596306165,
+    "lambda_passenger_final": 6.498944422289777,
+    "lambda_driver_final": 0.1525458710681413
+  }
+}

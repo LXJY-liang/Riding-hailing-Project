@@ -1,0 +1,16 @@
+{
+  "output_rows": 2306880,
+  "region_count": 801,
+  "time_count": 2880,
+  "D_origin_it_total": 5812445,
+  "D_dest_it_total": 5810898,
+  "positive_origin_rows": 731013,
+  "positive_destination_rows": 693802,
+  "zero_origin_rows": 1575867,
+  "weather_missing_rows": 0,
+  "weekday_rows": 1461024,
+  "weekend_rows": 768960,
+  "holiday_rows": 76896,
+  "output_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/3_3 区域-15min聚合（补全空值）结果.parquet",
+  "data_scope": "Chicago internal OD only"
+}

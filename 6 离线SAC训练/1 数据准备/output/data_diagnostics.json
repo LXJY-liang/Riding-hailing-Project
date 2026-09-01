@@ -1,0 +1,20 @@
+{
+  "source": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/2_2 OD-15min聚合_属于芝加哥.parquet",
+  "rows": 4462467,
+  "active_origin_time_groups": 731261,
+  "origins": 800,
+  "destinations": 801,
+  "time_min": "2024-06-01 00:00:00",
+  "time_max": "2024-06-30 23:45:00",
+  "price_cv_floor": 0.08,
+  "price_floor_applied_rows": 4038314,
+  "split_rows": {
+    "train": 2027087,
+    "warmup": 1525930,
+    "test": 528176,
+    "valid": 381274
+  },
+  "zero_demand_rows": 0,
+  "removed_nonpositive_price_rows": 3050,
+  "removed_nonpositive_price_orders": 3060
+}

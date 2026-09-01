@@ -1,0 +1,26 @@
+{
+  "format": "per-origin scipy CSR parts",
+  "matrix_axes": [
+    "time_index",
+    "destination_index"
+  ],
+  "part_shape": [
+    2880,
+    801
+  ],
+  "origin_count": 801,
+  "region_mapping": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/prepared_index/region_mapping.csv",
+  "time_mapping": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/prepared_index/time_mapping.parquet",
+  "pi_parts_directory": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/pi_distribution_parts",
+  "diagnostic_parts_directory": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/diagnostic_parts",
+  "part_name_pattern": "origin-{origin_index:04d}.npz",
+  "row_id_formula": "origin_index * time_count + time_index",
+  "n_min": 100,
+  "n_stop": 400,
+  "layer_weights": {
+    "1": 1.0,
+    "2": 0.95,
+    "3": 0.9,
+    "4": 0.5
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "history_input_rows": 5809389,
+  "history_rows": 5809389,
+  "od_group_count": 641601,
+  "strict_origin_time_group_count": 1076544,
+  "relaxed_origin_time_group_count": 538272,
+  "target_input_rows": 4457825,
+  "target_rows": 4457825,
+  "target_invalid_rows": 0,
+  "index_directory": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/intermediate/prepared_index"
+}

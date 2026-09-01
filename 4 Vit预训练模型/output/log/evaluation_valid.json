@@ -1,0 +1,6 @@
+{
+  "split": "valid",
+  "rows": 5000,
+  "mean_absolute_quantile_curve_error": 7.735961633663367,
+  "q50_mae": 7.514779765319824
+}

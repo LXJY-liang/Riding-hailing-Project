@@ -1,0 +1,10 @@
+{
+  "input_rows": 6050260,
+  "internal_od_rows": 5812445,
+  "removed_unique_rows": 237815,
+  "pickup_outside_rows": 117944,
+  "dropoff_outside_rows": 122132,
+  "both_outside_rows": 2261,
+  "chicago_region_count": 801,
+  "output_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/3_1 芝加哥内部OD订单.parquet"
+}

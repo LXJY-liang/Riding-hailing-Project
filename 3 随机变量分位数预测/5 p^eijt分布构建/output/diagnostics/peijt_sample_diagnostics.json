@@ -1,0 +1,18 @@
+{
+  "processed_rows_this_run": 4457825,
+  "skipped_existing_batches": 0,
+  "available_rows_this_run": 3509322,
+  "insufficient_rows_this_run": 3647748,
+  "workers": 4,
+  "sample_dataset": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/distribution/peijt_selected_samples",
+  "n_min": 50,
+  "n_max": 200,
+  "kde_components": "same_od_layers_1_2_3 + similar_od_layer_4",
+  "mixture_method": {
+    "basis": "effective_sample_size_and_trip_distance_similarity",
+    "similar_reliability_discount": 0.25,
+    "similar_only_min_samples": 10,
+    "similar_weight_cap_same_1_4": 0.5,
+    "similar_weight_cap_same_5_plus": 0.3
+  }
+}

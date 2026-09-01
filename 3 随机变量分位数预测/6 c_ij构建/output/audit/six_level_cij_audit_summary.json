@@ -1,0 +1,357 @@
+{
+  "sampling_rule": "one random OD from each estimation level",
+  "random_seed_base": 20240783,
+  "history_end": "2024-06-25 00:00:00",
+  "all_calibration_parameters": {
+    "history_end": "2024-06-25 00:00:00",
+    "distance_unit": "mile",
+    "direct_history_threshold": 20,
+    "interzone": {
+      "a": 3.8100279530987794e-17,
+      "b": 1.0688427941114134,
+      "kappa": 1.0054392676477464
+    },
+    "intrazone_network": {
+      "a": 0.9735052993547917,
+      "b": 0.3831859439679239
+    },
+    "intrazone_radius": {
+      "a": 0.9281870142247097,
+      "b": 0.7314391526265734
+    },
+    "intrazone_kappa": 7.4215048153922645
+  },
+  "samples": [
+    {
+      "sample": {
+        "i": "17031843900",
+        "j": "17031839000",
+        "estimation_level": 1,
+        "N_ij_in_result": 24,
+        "d_hist_median_miles_in_result": 8.649999618530273,
+        "d_map_miles_in_result": 7.631186008453369,
+        "d_prior_miles_in_result": 8.156538009643555,
+        "shrinkage_weight_in_result": 1.0,
+        "d_ij_miles_in_result": 8.649999618530273,
+        "c_ij_usd_in_result": 4.843999862670898
+      },
+      "historical_orders": {
+        "count_recomputed": 24,
+        "trip_miles": [
+          8.2,
+          8.7,
+          8.5,
+          8.6,
+          9.2,
+          7.7,
+          10.2,
+          7.7,
+          8.7,
+          8.6,
+          8.7,
+          8.7,
+          10.0,
+          9.8,
+          10.6,
+          10.6,
+          8.0,
+          8.6,
+          8.4,
+          10.2,
+          7.4,
+          7.4,
+          8.6,
+          8.7
+        ],
+        "median_miles_recomputed": 8.649999999999999,
+        "detail_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/6 c_ij构建/output/audit/six_level_cij_historical_distances.csv"
+      },
+      "spatial_prior": {
+        "source": "interzone_road_distance",
+        "raw_distance_miles": 7.631186008453369,
+        "calibrated_distance_miles": 8.156538175659223,
+        "origin_routing_node": "27729926",
+        "destination_routing_node": "874447445"
+      },
+      "calibration": {
+        "applied_to_final_distance": false,
+        "parameters_used": {
+          "a": 3.8100279530987794e-17,
+          "b": 1.0688427941114134,
+          "kappa": 1.0054392676477464
+        }
+      },
+      "reconstruction": {
+        "formula": "historical_median",
+        "history_weight": 1.0,
+        "cost_per_mile": 0.56,
+        "distance_miles_recomputed": 8.649999999999999,
+        "cost_usd_recomputed": 4.843999999999999,
+        "distance_difference": 0.0,
+        "cost_difference": 0.0
+      }
+    },
+    {
+      "sample": {
+        "i": "17031010202",
+        "j": "17031251100",
+        "estimation_level": 2,
+        "N_ij_in_result": 1,
+        "d_hist_median_miles_in_result": 12.300000190734863,
+        "d_map_miles_in_result": 11.930545806884766,
+        "d_prior_miles_in_result": 12.751877784729004,
+        "shrinkage_weight_in_result": 0.4986438751220703,
+        "d_ij_miles_in_result": 12.526552200317383,
+        "c_ij_usd_in_result": 7.014869213104248
+      },
+      "historical_orders": {
+        "count_recomputed": 1,
+        "trip_miles": [
+          12.3
+        ],
+        "median_miles_recomputed": 12.3,
+        "detail_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/6 c_ij构建/output/audit/six_level_cij_historical_distances.csv"
+      },
+      "spatial_prior": {
+        "source": "interzone_road_distance",
+        "raw_distance_miles": 11.930545806884766,
+        "calibrated_distance_miles": 12.75187791550492,
+        "origin_routing_node": "261118381",
+        "destination_routing_node": "261336497"
+      },
+      "calibration": {
+        "applied_to_final_distance": true,
+        "parameters_used": {
+          "a": 3.8100279530987794e-17,
+          "b": 1.0688427941114134,
+          "kappa": 1.0054392676477464
+        }
+      },
+      "reconstruction": {
+        "formula": "history_weight * historical_median + (1-history_weight) * calibrated_prior",
+        "history_weight": 0.4986438712616497,
+        "cost_per_mile": 0.56,
+        "distance_miles_recomputed": 12.526551762379903,
+        "cost_usd_recomputed": 7.014868986932746,
+        "distance_difference": 0.0,
+        "cost_difference": 0.0
+      }
+    },
+    {
+      "sample": {
+        "i": "17031421200",
+        "j": "17031440600",
+        "estimation_level": 3,
+        "N_ij_in_result": 0,
+        "d_hist_median_miles_in_result": null,
+        "d_map_miles_in_result": 3.1421334743499756,
+        "d_prior_miles_in_result": 3.3584468364715576,
+        "shrinkage_weight_in_result": 0.0,
+        "d_ij_miles_in_result": 3.3584468364715576,
+        "c_ij_usd_in_result": 1.880730152130127
+      },
+      "historical_orders": {
+        "count_recomputed": 0,
+        "trip_miles": [],
+        "median_miles_recomputed": null,
+        "detail_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/6 c_ij构建/output/audit/six_level_cij_historical_distances.csv"
+      },
+      "spatial_prior": {
+        "source": "interzone_road_distance",
+        "raw_distance_miles": 3.1421334743499756,
+        "calibrated_distance_miles": 3.358446722195231,
+        "origin_routing_node": "261308811",
+        "destination_routing_node": "261214309"
+      },
+      "calibration": {
+        "applied_to_final_distance": true,
+        "parameters_used": {
+          "a": 3.8100279530987794e-17,
+          "b": 1.0688427941114134,
+          "kappa": 1.0054392676477464
+        }
+      },
+      "reconstruction": {
+        "formula": "calibrated_prior",
+        "history_weight": 0.0,
+        "cost_per_mile": 0.56,
+        "distance_miles_recomputed": 3.358446722195231,
+        "cost_usd_recomputed": 1.8807301644293295,
+        "distance_difference": 0.0,
+        "cost_difference": 0.0
+      }
+    },
+    {
+      "sample": {
+        "i": "17031040402",
+        "j": "17031040402",
+        "estimation_level": 4,
+        "N_ij_in_result": 34,
+        "d_hist_median_miles_in_result": 0.6499999761581421,
+        "d_map_miles_in_result": 0.39756861329078674,
+        "d_prior_miles_in_result": 1.1258480548858643,
+        "shrinkage_weight_in_result": 1.0,
+        "d_ij_miles_in_result": 0.6499999761581421,
+        "c_ij_usd_in_result": 0.36399999260902405
+      },
+      "historical_orders": {
+        "count_recomputed": 34,
+        "trip_miles": [
+          2.7,
+          0.5,
+          0.4,
+          0.7,
+          0.3,
+          0.6,
+          7.6,
+          5.8,
+          0.7,
+          0.5,
+          1.8,
+          0.6,
+          0.7,
+          0.5,
+          0.5,
+          0.5,
+          0.4,
+          0.6,
+          0.7,
+          3.8,
+          2.7,
+          0.7,
+          2.7,
+          0.5,
+          0.7,
+          0.8,
+          3.6,
+          0.5,
+          0.6,
+          0.5,
+          1.7,
+          0.7,
+          0.4,
+          0.6
+        ],
+        "median_miles_recomputed": 0.6499999999999999,
+        "detail_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/6 c_ij构建/output/audit/six_level_cij_historical_distances.csv"
+      },
+      "spatial_prior": {
+        "source": "intrazone_network_distance",
+        "raw_distance_miles": 0.39756861329078674,
+        "calibrated_distance_miles": 1.1258480037306402,
+        "origin_routing_node": "262158752",
+        "destination_routing_node": "262158752"
+      },
+      "calibration": {
+        "applied_to_final_distance": false,
+        "parameters_used": {
+          "a": 0.9735052993547917,
+          "b": 0.3831859439679239,
+          "kappa": 7.4215048153922645
+        }
+      },
+      "reconstruction": {
+        "formula": "historical_median",
+        "history_weight": 1.0,
+        "cost_per_mile": 0.56,
+        "distance_miles_recomputed": 0.6499999999999999,
+        "cost_usd_recomputed": 0.364,
+        "distance_difference": 0.0,
+        "cost_difference": 0.0
+      }
+    },
+    {
+      "sample": {
+        "i": "17031030604",
+        "j": "17031030604",
+        "estimation_level": 5,
+        "N_ij_in_result": 4,
+        "d_hist_median_miles_in_result": 2.5,
+        "d_map_miles_in_result": 0.13666561245918274,
+        "d_prior_miles_in_result": 1.0258736610412598,
+        "shrinkage_weight_in_result": 0.3502165377140045,
+        "d_ij_miles_in_result": 1.5421371459960938,
+        "c_ij_usd_in_result": 0.8635967969894409
+      },
+      "historical_orders": {
+        "count_recomputed": 4,
+        "trip_miles": [
+          0.2,
+          4.6,
+          42.1,
+          0.4
+        ],
+        "median_miles_recomputed": 2.5,
+        "detail_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/6 c_ij构建/output/audit/six_level_cij_historical_distances.csv"
+      },
+      "spatial_prior": {
+        "source": "intrazone_network_distance",
+        "raw_distance_miles": 0.13666561245918274,
+        "calibrated_distance_miles": 1.0258736410729181,
+        "origin_routing_node": "2328729126",
+        "destination_routing_node": "2328729126"
+      },
+      "calibration": {
+        "applied_to_final_distance": true,
+        "parameters_used": {
+          "a": 0.9735052993547917,
+          "b": 0.3831859439679239,
+          "kappa": 7.4215048153922645
+        }
+      },
+      "reconstruction": {
+        "formula": "history_weight * historical_median + (1-history_weight) * calibrated_prior",
+        "history_weight": 0.3502165489270183,
+        "cost_per_mile": 0.56,
+        "distance_miles_recomputed": 1.5421370871787117,
+        "cost_usd_recomputed": 0.8635967688200786,
+        "distance_difference": 0.0,
+        "cost_difference": 0.0
+      }
+    },
+    {
+      "sample": {
+        "i": "17031300500",
+        "j": "17031300500",
+        "estimation_level": 6,
+        "N_ij_in_result": 0,
+        "d_hist_median_miles_in_result": null,
+        "d_map_miles_in_result": 0.5034698247909546,
+        "d_prior_miles_in_result": 1.1664278507232666,
+        "shrinkage_weight_in_result": 0.0,
+        "d_ij_miles_in_result": 1.1664278507232666,
+        "c_ij_usd_in_result": 0.6531996130943298
+      },
+      "historical_orders": {
+        "count_recomputed": 0,
+        "trip_miles": [],
+        "median_miles_recomputed": null,
+        "detail_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/6 c_ij构建/output/audit/six_level_cij_historical_distances.csv"
+      },
+      "spatial_prior": {
+        "source": "intrazone_network_distance",
+        "raw_distance_miles": 0.5034698247909546,
+        "calibrated_distance_miles": 1.1664278594266788,
+        "origin_routing_node": "261281694",
+        "destination_routing_node": "261281694"
+      },
+      "calibration": {
+        "applied_to_final_distance": true,
+        "parameters_used": {
+          "a": 0.9735052993547917,
+          "b": 0.3831859439679239,
+          "kappa": 7.4215048153922645
+        }
+      },
+      "reconstruction": {
+        "formula": "calibrated_prior",
+        "history_weight": 0.0,
+        "cost_per_mile": 0.56,
+        "distance_miles_recomputed": 1.1664278594266788,
+        "cost_usd_recomputed": 0.6531996012789402,
+        "distance_difference": 0.0,
+        "cost_difference": 0.0
+      }
+    }
+  ]
+}

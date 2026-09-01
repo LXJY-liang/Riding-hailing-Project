@@ -1,0 +1,17 @@
+{
+  "sample_count": 381568,
+  "mean_pinball_loss": 1.2165601253509521,
+  "median_mae": 3.347125291824341,
+  "median_rmse": 5.3943963050842285,
+  "mean_calibration_error": 0.01286876238388424,
+  "crossing_pair_rate": 0.0,
+  "crossing_sample_rate": 0.0,
+  "interval_50_coverage": 0.5353462554511909,
+  "interval_50_mean_width": 5.523857593536377,
+  "interval_80_coverage": 0.8229620932572962,
+  "interval_80_mean_width": 11.073058128356934,
+  "interval_90_coverage": 0.9209524907749077,
+  "interval_90_mean_width": 15.635480880737305,
+  "interval_98_coverage": 0.9840080929218383,
+  "interval_98_mean_width": 28.161941528320312
+}

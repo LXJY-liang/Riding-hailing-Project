@@ -1,0 +1,11 @@
+{
+  "internal_order_rows": 5812445,
+  "departure_rows_in_june": 5812445,
+  "arrival_rows_in_june": 5810898,
+  "sparse_region_time_rows": 931842,
+  "region_count": 801,
+  "time_count": 2880,
+  "D_origin_it_total": 5812445,
+  "D_dest_it_total": 5810898,
+  "output_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/3_2 区域-15min聚合（内部OD口径）结果.parquet"
+}

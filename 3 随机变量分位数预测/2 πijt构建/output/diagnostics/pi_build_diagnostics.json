@@ -1,0 +1,22 @@
+{
+  "requested_origin_count": 801,
+  "processed_origin_count_this_run": 801,
+  "skipped_origin_count": 0,
+  "workers": 4,
+  "n_min": 100,
+  "n_stop": 400,
+  "layer_weights": {
+    "1": 1.0,
+    "2": 0.95,
+    "3": 0.9,
+    "4": 0.5
+  },
+  "rows_written_this_run": 2306880,
+  "pi_nnz_written_this_run": 247494570,
+  "available_rows_this_run": 2286395,
+  "insufficient_rows_this_run": 469171,
+  "layer4_used_rows_this_run": 1492364,
+  "maximum_stop_overshoot_orders_this_run": 279,
+  "pi_parts_directory": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/pi_distribution_parts",
+  "diagnostic_parts_directory": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/2 πijt构建/output/diagnostic_parts"
+}

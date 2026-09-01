@@ -1,0 +1,40 @@
+{
+  "split": "train",
+  "episode_days": 14,
+  "od_rows": 1851265,
+  "passenger_target": 0.7,
+  "driver_target": 0.95,
+  "price_ratio_min": 0.3,
+  "price_ratio_max": 1.5,
+  "current_subsidy_max_ratio": 0.5,
+  "passenger_infeasible_rows_at_price_min": 169,
+  "passenger_infeasible_rate": 9.128892946174643e-05,
+  "driver_or_joint_infeasible_rows_at_kappa_0_50": 37340,
+  "driver_audit_semantics": "completed_main20_run_cross_day_value_zero",
+  "subsidy_sensitivity": {
+    "kappa_0.50": {
+      "driver_infeasible_rows_among_listed_passenger_feasible": 37171
+    },
+    "kappa_0.75": {
+      "driver_infeasible_rows_among_listed_passenger_feasible": 26589
+    },
+    "kappa_1.00": {
+      "driver_infeasible_rows_among_listed_passenger_feasible": 21250
+    },
+    "kappa_1.50": {
+      "driver_infeasible_rows_among_listed_passenger_feasible": 17036
+    },
+    "kappa_2.00": {
+      "driver_infeasible_rows_among_listed_passenger_feasible": 15744
+    }
+  },
+  "driver_only_infeasible_at_absolute_price_max_kappa_0_50": 22150,
+  "required_subsidy_ratio_quantiles_among_listed": {
+    "0.5": 0.7681142389774323,
+    "0.75": 1.0557801425457,
+    "0.9": 1.487445914745331,
+    "0.95": 1.866055005788804,
+    "0.99": 2.9269843220710765,
+    "1.0": 16.176109313964844
+  }
+}

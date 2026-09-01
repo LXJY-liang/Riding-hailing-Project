@@ -1,0 +1,7 @@
+{
+  "crossing_pair_rate": 0.0,
+  "crossing_sample_rate": 0.0,
+  "negative_prediction_rate_all_quantiles": 0.0,
+  "negative_sample_rate_any_quantile": 0.0,
+  "min_prediction": 0.0
+}
