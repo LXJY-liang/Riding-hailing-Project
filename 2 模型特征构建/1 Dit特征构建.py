@@ -17,19 +17,173 @@ import pandas as pd
 # 1. 路径设置
 # ============================================================
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # 严格的 801 区域内部 OD 口径区域-15min完整面板
-REGION_PANEL_FILE = "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/3_3 区域-15min聚合（补全空值）结果.parquet"
+REGION_PANEL_FILE = os.path.join(
+    PROJECT_ROOT,
+    "1 数据清洗",
+    "3_3 区域-15min聚合（补全空值）结果.parquet",
+)
+
+# 内部 OD 历史，用于构造只依赖目标日之前历史的区域联系权重
+OD_HISTORY_FILE = os.path.join(
+    PROJECT_ROOT,
+    "1 数据清洗",
+    "2_2 OD-15min聚合_属于芝加哥.parquet",
+)
 
 # 邻近区域关系表
-NEIGHBOR_FILE = "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/4 邻近区域关系表构造结果.parquet"
+NEIGHBOR_FILE = os.path.join(
+    PROJECT_ROOT,
+    "1 数据清洗",
+    "4 邻近区域关系表构造结果.parquet",
+)
 
 # Dit特征构建结果输出目录
-OUTPUT_DIR = "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/2 模型特征构建"
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "2 模型特征构建")
 
 # Dit特征构建结果输出文件
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "1 Dit特征构建（结果）.parquet")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+TIME_STEPS_PER_DAY = 96
+RELATION_SLOT_RADIUS = 1
+
+
+def construct_related_region_features(df, region_ids, region_to_idx):
+    """构造逐日扩展、严格滞后一格的两项历史OD关联区域特征。"""
+
+    if not os.path.exists(OD_HISTORY_FILE):
+        raise FileNotFoundError(f"缺少OD历史文件：{OD_HISTORY_FILE}")
+
+    od = pd.read_parquet(
+        OD_HISTORY_FILE,
+        columns=[
+            "i",
+            "j",
+            "t",
+            "slot_in_day",
+            "is_weekend_or_holiday",
+            "D_ijt_observed",
+        ],
+    )
+    od["i"] = od["i"].astype(str)
+    od["j"] = od["j"].astype(str)
+    od["t"] = pd.to_datetime(od["t"], errors="raise")
+    od["date"] = od["t"].dt.normalize()
+    od["i_idx"] = od["i"].map(region_to_idx)
+    od["j_idx"] = od["j"].map(region_to_idx)
+    if od[["i_idx", "j_idx"]].isna().any().any():
+        raise ValueError("OD历史中存在不属于801区域面板的起点或终点。")
+    od["i_idx"] = od["i_idx"].astype(np.int16)
+    od["j_idx"] = od["j_idx"].astype(np.int16)
+    od["slot_in_day"] = od["slot_in_day"].astype(np.int16)
+    od["D_ijt_observed"] = pd.to_numeric(
+        od["D_ijt_observed"], errors="raise"
+    ).astype(np.float32)
+    if (od["D_ijt_observed"] < 0).any():
+        raise ValueError("OD历史中出现负订单量。")
+
+    timestamps = pd.DatetimeIndex(sorted(df["t"].unique()))
+    n_regions = len(region_ids)
+    dates = pd.DatetimeIndex(timestamps.normalize().unique())
+    n_times = len(timestamps)
+    demand_cube = (
+        df["D_origin_it"].to_numpy(dtype=np.float32).reshape(n_times, n_regions)
+    )
+    related_dest = np.zeros((n_times, n_regions), dtype=np.float32)
+    related_origin = np.zeros((n_times, n_regions), dtype=np.float32)
+
+    # 分别累计工作日、周末/节假日，以及不区分日期类型的历史OD流量。
+    flow_by_day_type = np.zeros(
+        (2, TIME_STEPS_PER_DAY, n_regions, n_regions), dtype=np.float32
+    )
+    flow_all = np.zeros(
+        (TIME_STEPS_PER_DAY, n_regions, n_regions), dtype=np.float32
+    )
+    od_by_time = od.groupby("t", sort=False, observed=True)
+    od_times = set(od_by_time.groups)
+
+    panel_day_type = (
+        df.assign(date=df["t"].dt.normalize())
+        .groupby("date", sort=True, observed=True)["is_weekend_or_holiday"]
+        .first()
+    )
+
+    for day_index, day in enumerate(dates):
+        day_type = int(panel_day_type.loc[day])
+        if day_type not in (0, 1):
+            raise ValueError(f"{day.date()}的日期类型不是0或1。")
+
+        for slot in range(TIME_STEPS_PER_DAY):
+            time_index = day_index * TIME_STEPS_PER_DAY + slot
+            if time_index == 0:
+                continue
+
+            left = max(0, slot - RELATION_SLOT_RADIUS)
+            right = min(TIME_STEPS_PER_DAY, slot + RELATION_SLOT_RADIUS + 1)
+            specific_flow = flow_by_day_type[day_type, left:right].sum(axis=0)
+            fallback_flow = flow_all[left:right].sum(axis=0)
+
+            # 与Vit一致：某起点在相同日期类型下没有历史时，回退到所有日期类型。
+            use_specific = specific_flow.sum(axis=1) > 0
+            relation_flow = fallback_flow.copy()
+            relation_flow[use_specific] = specific_flow[use_specific]
+
+            out_total = relation_flow.sum(axis=1, keepdims=True)
+            out_weight = np.divide(
+                relation_flow,
+                out_total,
+                out=np.zeros_like(relation_flow),
+                where=out_total > 0,
+            )
+            previous_demand = demand_cube[time_index - 1]
+            related_dest[time_index] = out_weight @ previous_demand
+
+            previous_time = timestamps[time_index - 1]
+            actual_flow = np.zeros((n_regions, n_regions), dtype=np.float32)
+            if previous_time in od_times:
+                previous_od = od_by_time.get_group(previous_time)
+                np.add.at(
+                    actual_flow,
+                    (
+                        previous_od["i_idx"].to_numpy(dtype=np.int16),
+                        previous_od["j_idx"].to_numpy(dtype=np.int16),
+                    ),
+                    previous_od["D_ijt_observed"].to_numpy(dtype=np.float32),
+                )
+            in_total = relation_flow.sum(axis=0, keepdims=True)
+            in_weight = np.divide(
+                relation_flow,
+                in_total,
+                out=np.zeros_like(relation_flow),
+                where=in_total > 0,
+            )
+            related_origin[time_index] = (in_weight * actual_flow).sum(axis=0)
+
+        # 当天全部96个时段计算完成后才纳入历史，防止同日未来信息泄漏。
+        day_od = od.loc[od["date"] == day]
+        if not day_od.empty:
+            indices = (
+                day_od["slot_in_day"].to_numpy(dtype=np.int16),
+                day_od["i_idx"].to_numpy(dtype=np.int16),
+                day_od["j_idx"].to_numpy(dtype=np.int16),
+            )
+            values = day_od["D_ijt_observed"].to_numpy(dtype=np.float32)
+            np.add.at(flow_all, indices, values)
+            np.add.at(flow_by_day_type[day_type], indices, values)
+
+    outputs = (related_dest, related_origin)
+    if any(not np.isfinite(values).all() for values in outputs):
+        raise ValueError("历史OD关联区域特征中出现NaN或无穷值。")
+    if any((values < 0).any() for values in outputs):
+        raise ValueError("历史OD关联区域特征中出现负值。")
+    if any(np.any(values[:TIME_STEPS_PER_DAY] != 0) for values in outputs):
+        raise AssertionError("首日没有更早OD历史，两项关联特征应全部为0。")
+
+    return tuple(values.reshape(-1) for values in outputs)
 
 
 # ============================================================
@@ -316,7 +470,17 @@ for source_col in neighbor_source_cols:
 
 
 # ============================================================
-# 12. 整理最终 Dit 特征表字段
+# 12. 构造历史OD关联区域滞后特征
+# ============================================================
+
+(
+    df["related_dest_demand_lag1"],
+    df["related_origin_inflow_lag1"],
+) = construct_related_region_features(df, region_ids, region_to_idx)
+
+
+# ============================================================
+# 13. 整理最终 Dit 特征表字段
 # ============================================================
 
 final_cols = [
@@ -358,6 +522,10 @@ final_cols = [
     "neighbor_D_origin_roll4_mean",
     "neighbor_D_origin_roll8_mean",
 
+    # 历史OD关联区域特征
+    "related_dest_demand_lag1",
+    "related_origin_inflow_lag1",
+
     # 标签
     "D_it_label",
 ]
@@ -366,7 +534,7 @@ dit = df[final_cols].copy()
 
 
 # ============================================================
-# 13. 类型压缩
+# 14. 类型压缩
 # ============================================================
 
 dit["region_id"] = dit["region_id"].astype("string")
@@ -403,6 +571,8 @@ float_cols = [
     "neighbor_D_origin_lag1",
     "neighbor_D_origin_roll4_mean",
     "neighbor_D_origin_roll8_mean",
+    "related_dest_demand_lag1",
+    "related_origin_inflow_lag1",
 ]
 
 for col in float_cols:
@@ -410,7 +580,7 @@ for col in float_cols:
 
 
 # ============================================================
-# 14. 保存 Dit 特征构建结果
+# 15. 保存 Dit 特征构建结果
 # ============================================================
 
 if os.path.exists(OUTPUT_FILE):
@@ -425,7 +595,7 @@ dit.to_parquet(
 
 
 # ============================================================
-# 15. 终端输出检查结果
+# 16. 终端输出检查结果
 # ============================================================
 
 print("完成")

@@ -1,0 +1,15 @@
+{
+  "causal_features": true,
+  "current_period_orders_used": false,
+  "future_orders_used": false,
+  "uses_full_month_quantile_winsorization": false,
+  "profit_per_minute_bounds": [
+    -5.0,
+    5.0
+  ],
+  "profit_per_order_bounds": [
+    -100.0,
+    200.0
+  ],
+  "rows": 2306880
+}

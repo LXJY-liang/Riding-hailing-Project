@@ -3,6 +3,7 @@ import argparse
 import importlib.util
 import json
 import math
+import os
 import random
 import shutil
 import sys
@@ -37,12 +38,23 @@ model_module = load_module("3 tauijt模型.py", "tauijt_model")
 # =========================
 
 def set_seed(seed):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    if config.strict_determinism:
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+    if torch.backends.cudnn.is_available():
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    if config.strict_determinism:
+        torch.use_deterministic_algorithms(True)
 
 
 def get_device():
@@ -134,7 +146,14 @@ def evaluate(model, data_loader, device, amp_dtype):
     return total_loss / total_samples
 
 
-def save_best_model(model, epoch, global_step, valid_loss):
+def save_best_model(
+    model,
+    epoch,
+    global_step,
+    valid_loss,
+    valid_sample_count,
+    valid_original_count,
+):
     """保存验证损失最低的LoRA和分位数头。"""
 
     if config.lora_adapter_path.exists():
@@ -156,6 +175,16 @@ def save_best_model(model, epoch, global_step, valid_loss):
                 "best_epoch": epoch,
                 "best_global_step": global_step,
                 "best_valid_loss": valid_loss,
+                "seed": config.seed,
+                "sample_seed": config.sample_seed,
+                "strict_determinism": config.strict_determinism,
+                "train_sample_fraction": config.train_sample_fraction,
+                "validation_sample_fraction": (
+                    config.validation_sample_fraction
+                ),
+                "validation_sample_seed": config.validation_sample_seed,
+                "validation_sample_count": valid_sample_count,
+                "validation_original_count": valid_original_count,
             },
             file,
             ensure_ascii=False,
@@ -315,7 +344,7 @@ def sample_train_dataset(train_dataset):
     )
     if sample_count < original_count:
         train_dataset = (
-            train_dataset.shuffle(seed=config.seed).select(range(sample_count))
+            train_dataset.shuffle(seed=config.sample_seed).select(range(sample_count))
         )
 
     print(
@@ -323,6 +352,39 @@ def sample_train_dataset(train_dataset):
         f"原始样本数={original_count}，实际抽样数量={sample_count}"
     )
     return train_dataset, original_count, sample_count
+
+
+def sample_valid_dataset(valid_dataset):
+    """固定抽取验证子集，保证各次验证结果可以直接比较。"""
+
+    fraction = float(config.validation_sample_fraction)
+    if not 0 < fraction <= 1:
+        raise ValueError(
+            "validation_sample_fraction必须在(0, 1]之间，"
+            f"当前值为{config.validation_sample_fraction}"
+        )
+
+    original_count = len(valid_dataset)
+    sample_count = (
+        original_count
+        if fraction >= 1.0
+        else max(1, round(original_count * fraction))
+    )
+    if sample_count < original_count:
+        valid_dataset = (
+            valid_dataset
+            .shuffle(seed=config.validation_sample_seed)
+            .select(range(sample_count))
+        )
+
+    print(
+        "验证集固定抽样："
+        f"fraction={fraction:.4f}，"
+        f"原始样本数={original_count}，"
+        f"实际验证数量={sample_count}，"
+        f"seed={config.validation_sample_seed}"
+    )
+    return valid_dataset, original_count, sample_count
 
 
 def print_validation_trend(history):
@@ -351,12 +413,37 @@ def validate_required_paths():
         config.label_scaler_path,
         config.train_tokenized_path,
         config.valid_tokenized_path,
+        config.data_manifest_path,
+        config.tokenization_manifest_path,
     ]
     missing_paths = [str(path) for path in required_paths if not path.exists()]
     if missing_paths:
         raise FileNotFoundError(
             "tauijt训练缺少必要输入，请先上传或生成：\n"
             + "\n".join(missing_paths)
+        )
+
+
+def validate_dataset_counts(train_dataset, valid_dataset):
+    """核对服务器上的Tokenized数据与本地新清洗样本清单。"""
+
+    with open(config.tokenization_manifest_path, "r", encoding="utf-8") as file:
+        manifest = json.load(file)
+
+    actual_counts = {
+        "train": len(train_dataset),
+        "valid": len(valid_dataset),
+    }
+    mismatches = []
+    for split_name, actual_count in actual_counts.items():
+        expected_count = int(manifest["split_counts"][split_name])
+        if actual_count != expected_count:
+            mismatches.append(
+                f"{split_name}: Tokenized={actual_count}, 清单={expected_count}"
+            )
+    if mismatches:
+        raise RuntimeError(
+            "服务器Tokenized数据与最新样本清单不一致：\n" + "\n".join(mismatches)
         )
 
 
@@ -386,8 +473,12 @@ def main():
 
     train_dataset = load_from_disk(str(config.train_tokenized_path))
     valid_dataset = load_from_disk(str(config.valid_tokenized_path))
+    validate_dataset_counts(train_dataset, valid_dataset)
     train_dataset, train_original_count, train_sample_count = (
         sample_train_dataset(train_dataset)
+    )
+    valid_dataset, valid_original_count, valid_sample_count = (
+        sample_valid_dataset(valid_dataset)
     )
 
     collator = tauijt_collator(tokenizer)
@@ -485,6 +576,9 @@ def main():
 
     print(
         "tauijt正式训练配置："
+        f"seed={config.seed}，"
+        f"sample_seed={config.sample_seed}，"
+        f"strict_determinism={config.strict_determinism}，"
         f"train_batch_size={config.train_batch_size}，"
         f"gradient_accumulation_steps={config.gradient_accumulation_steps}，"
         f"effective_batch="
@@ -495,7 +589,11 @@ def main():
         f"gradient_checkpointing={config.use_gradient_checkpointing}，"
         f"LoRA层={config.lora_layer_start}-{config.lora_layer_end}，"
         f"checkpoint_save_steps={config.checkpoint_save_steps}，"
-        f"validation_steps={config.validation_steps}"
+        f"validation_steps={config.validation_steps}，"
+        f"validation_sample_fraction="
+        f"{config.validation_sample_fraction}，"
+        f"validation_sample_count="
+        f"{valid_sample_count}/{valid_original_count}"
     )
 
     for epoch in range(start_epoch, config.num_epochs + 1):
@@ -576,7 +674,10 @@ def main():
                 if global_step == 1:
                     log_gpu_memory("第1个optimizer step后显存")
 
-                if global_step % config.validation_steps == 0:
+                if (
+                    config.validation_steps is not None
+                    and global_step % config.validation_steps == 0
+                ):
                     valid_loss = evaluate(
                         model,
                         valid_loader,
@@ -596,6 +697,8 @@ def main():
                             epoch,
                             global_step,
                             valid_loss,
+                            valid_sample_count,
+                            valid_original_count,
                         )
 
                     history.append(
@@ -608,6 +711,8 @@ def main():
                             "valid_loss": valid_loss,
                             "best_valid_loss": best_valid_loss,
                             "is_best": is_best,
+                            "valid_sample_count": valid_sample_count,
+                            "valid_original_count": valid_original_count,
                         }
                     )
                     write_validation_history(history)
@@ -666,6 +771,8 @@ def main():
                 "valid_loss": valid_loss,
                 "best_valid_loss": min(best_valid_loss, valid_loss),
                 "is_best": valid_loss < best_valid_loss,
+                "valid_sample_count": valid_sample_count,
+                "valid_original_count": valid_original_count,
             }
         )
 
@@ -677,7 +784,14 @@ def main():
 
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
-            save_best_model(model, epoch, global_step, valid_loss)
+            save_best_model(
+                model,
+                epoch,
+                global_step,
+                valid_loss,
+                valid_sample_count,
+                valid_original_count,
+            )
 
         write_validation_history(history)
         print_validation_trend(history)

@@ -46,10 +46,15 @@ def check_sample_dataset() -> dict[str, int | float]:
         "similar_od_mixture_weight", "similar_od_mean_similarity",
         "max_final_sample_weight", "max_match_level", "layer1_count",
         "layer2_count", "layer3_count", "layer4_count", "layer4a_count",
-        "layer4b_count", "target_reference_trip_miles",
+        "layer4b_count", "layer4c_count", "layer5a_count", "layer5b_count",
+        "layer5c_count", "layer5d_count", "layer5e_count",
+        "target_reference_trip_miles",
         "target_distance_sample_count", "distance_reference_unavailable_flag",
+        "target_distance_reference_source", "self_route_rejected_count",
+        "target_distance_rejected_count", "self_short_absolute_accepted_count",
+        "target_short_absolute_accepted_count",
         "unreliable_similar_only_flag", "sample_prices", "sample_levels",
-        "sample_trip_miles", "sample_similarity_weights",
+        "sample_sublevels", "sample_trip_miles", "sample_similarity_weights",
     }
     missing = sorted(required - set(dataset.schema.names))
     if missing:
@@ -71,6 +76,7 @@ def check_sample_dataset() -> dict[str, int | float]:
         "sample_similarity_weight_invalid_rows": 0,
         "sample_layer4_distance_invalid_rows": 0,
         "sample_max_weight_invalid_rows": 0,
+        "sample_distance_diagnostic_invalid_rows": 0,
     }
     columns = sorted(required - {"i", "j", "t"})
     for batch in dataset.scanner(columns=columns, batch_size=20_000).to_batches():
@@ -99,13 +105,40 @@ def check_sample_dataset() -> dict[str, int | float]:
         max_final_weight = data["max_final_sample_weight"].to_numpy(
             dtype=np.float64
         )
+        distance_source = data["target_distance_reference_source"].to_numpy(
+            dtype=np.int16
+        )
+        self_rejected = data["self_route_rejected_count"].to_numpy(dtype=np.int32)
+        target_rejected = data["target_distance_rejected_count"].to_numpy(
+            dtype=np.int32
+        )
+        self_short_accepted = data[
+            "self_short_absolute_accepted_count"
+        ].to_numpy(dtype=np.int32)
+        target_short_accepted = data[
+            "target_short_absolute_accepted_count"
+        ].to_numpy(dtype=np.int32)
+        counters["sample_distance_diagnostic_invalid_rows"] += int(
+            (
+                (distance_source < 0)
+                | (distance_source > 3)
+                | (self_rejected < 0)
+                | (target_rejected < 0)
+                | (self_short_accepted < 0)
+                | (target_short_accepted < 0)
+            ).sum()
+        )
 
         price_lists = data["sample_prices"].tolist()
         level_lists = data["sample_levels"].tolist()
+        sublevel_lists = data["sample_sublevels"].tolist()
         miles_lists = data["sample_trip_miles"].tolist()
         similarity_lists = data["sample_similarity_weights"].tolist()
         price_lengths = np.fromiter((len(x) for x in price_lists), dtype=np.int32)
         level_lengths = np.fromiter((len(x) for x in level_lists), dtype=np.int32)
+        sublevel_lengths = np.fromiter(
+            (len(x) for x in sublevel_lists), dtype=np.int32
+        )
         miles_lengths = np.fromiter((len(x) for x in miles_lists), dtype=np.int32)
         similarity_lengths = np.fromiter(
             (len(x) for x in similarity_lists), dtype=np.int32
@@ -114,6 +147,7 @@ def check_sample_dataset() -> dict[str, int | float]:
             (
                 (price_lengths != sample_count)
                 | (level_lengths != sample_count)
+                | (sublevel_lengths != sample_count)
                 | (miles_lengths != sample_count)
                 | (similarity_lengths != sample_count)
             ).sum()
@@ -203,11 +237,12 @@ def check_sample_dataset() -> dict[str, int | float]:
         bad_level = 0
         bad_similarity = 0
         bad_layer4_distance = 0
-        for prices, levels, miles, similarities in zip(
-            price_lists, level_lists, miles_lists, similarity_lists
+        for prices, levels, sublevels, miles, similarities in zip(
+            price_lists, level_lists, sublevel_lists, miles_lists, similarity_lists
         ):
             prices_array = np.asarray(prices, dtype=np.float64)
             levels_array = np.asarray(levels, dtype=np.int8)
+            sublevels_array = np.asarray(sublevels, dtype="U2")
             miles_array = np.asarray(miles, dtype=np.float64)
             similarities_array = np.asarray(similarities, dtype=np.float64)
             bad_price += int(
@@ -216,7 +251,14 @@ def check_sample_dataset() -> dict[str, int | float]:
             )
             bad_level += int(
                 len(levels_array) > 0
-                and np.any((levels_array < 1) | (levels_array > 4))
+                and (
+                    np.any((levels_array < 1) | (levels_array > 5))
+                    or np.any(
+                        ((levels_array <= 3) & ~np.isin(sublevels_array, ["1", "2", "3"]))
+                        | ((levels_array == 4) & ~np.isin(sublevels_array, ["4A", "4B", "4C"]))
+                        | ((levels_array == 5) & ~np.isin(sublevels_array, ["5A", "5B", "5C", "5D", "5E"]))
+                    )
+                )
             )
             bad_similarity += int(
                 len(similarities_array) > 0
@@ -226,7 +268,7 @@ def check_sample_dataset() -> dict[str, int | float]:
                     | (similarities_array > 1.0 + 1e-6)
                 )
             )
-            layer4 = levels_array == 4
+            layer4 = levels_array >= 4
             bad_layer4_distance += int(
                 layer4.any()
                 and np.any(~np.isfinite(miles_array[layer4]) | (miles_array[layer4] <= 0))
@@ -255,6 +297,12 @@ def check_sample_dataset() -> dict[str, int | float]:
         layer4_sum = (
             data["layer4a_count"].to_numpy(dtype=np.int32)
             + data["layer4b_count"].to_numpy(dtype=np.int32)
+            + data["layer4c_count"].to_numpy(dtype=np.int32)
+            + data["layer5a_count"].to_numpy(dtype=np.int32)
+            + data["layer5b_count"].to_numpy(dtype=np.int32)
+            + data["layer5c_count"].to_numpy(dtype=np.int32)
+            + data["layer5d_count"].to_numpy(dtype=np.int32)
+            + data["layer5e_count"].to_numpy(dtype=np.int32)
         )
         counters["sample_layer4_subcount_mismatch_rows"] += int(
             (layer4_sum != data["layer4_count"].to_numpy(dtype=np.int32)).sum()
@@ -270,7 +318,10 @@ def check_quantile_dataset() -> dict[str, int | float | dict[str, int]]:
         "same_od_effective_sample_size", "similar_od_effective_sample_size",
         "same_od_bandwidth_usd", "similar_od_bandwidth_usd",
         "same_od_mixture_weight", "similar_od_mixture_weight",
-        "max_match_level", "q30_to_q50_ratio", "q50_to_q30_ratio",
+        "similar_od_mean_similarity", "max_match_level",
+        "adaptive_reweight_flag", "same_route_consistency_factor",
+        "pre_adjustment_q30_to_q50_ratio",
+        "q30_to_q50_ratio", "q50_to_q30_ratio",
         "q50_q30_extreme_flag",
         *cfg.QUANTILE_COLUMNS,
     }
@@ -288,6 +339,7 @@ def check_quantile_dataset() -> dict[str, int | float | dict[str, int]]:
         "unavailable_with_nonmissing_quantile_rows": 0,
         "quantile_component_effective_size_invalid_rows": 0,
         "quantile_mixture_weight_invalid_rows": 0,
+        "quantile_adaptive_reweight_invalid_rows": 0,
         "quantile_structural_audit_flag_mismatch_rows": 0,
         "q50_q30_extreme_count": 0,
     }
@@ -296,7 +348,9 @@ def check_quantile_dataset() -> dict[str, int | float | dict[str, int]]:
         "available_flag", "sample_count", "same_od_sample_count",
         "similar_od_sample_count", "same_od_effective_sample_size",
         "similar_od_effective_sample_size", "same_od_mixture_weight",
-        "similar_od_mixture_weight", "max_match_level",
+        "similar_od_mixture_weight", "similar_od_mean_similarity",
+        "adaptive_reweight_flag", "same_route_consistency_factor",
+        "pre_adjustment_q30_to_q50_ratio", "max_match_level",
         "q30_to_q50_ratio", "q50_to_q30_ratio", "q50_q30_extreme_flag",
     ] + cfg.QUANTILE_COLUMNS
     for batch in dataset.scanner(columns=columns, batch_size=20_000).to_batches():
@@ -313,6 +367,16 @@ def check_quantile_dataset() -> dict[str, int | float | dict[str, int]]:
         )
         same_mix = data["same_od_mixture_weight"].to_numpy(dtype=np.float64)
         similar_mix = data["similar_od_mixture_weight"].to_numpy(dtype=np.float64)
+        similar_mean = data["similar_od_mean_similarity"].to_numpy(
+            dtype=np.float64
+        )
+        adaptive_flag = data["adaptive_reweight_flag"].to_numpy(dtype=np.int8)
+        route_factor = data["same_route_consistency_factor"].to_numpy(
+            dtype=np.float64
+        )
+        pre_ratio = data["pre_adjustment_q30_to_q50_ratio"].to_numpy(
+            dtype=np.float64
+        )
         quantiles = data[cfg.QUANTILE_COLUMNS].to_numpy(dtype=np.float64)
         stored_ratio = data["q30_to_q50_ratio"].to_numpy(dtype=np.float64)
         stored_inverse_ratio = data["q50_to_q30_ratio"].to_numpy(
@@ -403,6 +467,56 @@ def check_quantile_dataset() -> dict[str, int | float | dict[str, int]]:
                     | (np.abs(same_mix + similar_mix - 1.0) > 1e-6)
                 )
             ).sum()
+        )
+        adaptive_invalid = np.zeros(len(data), dtype=bool)
+        for row_index in np.flatnonzero(available):
+            if adaptive_flag[row_index] == 0:
+                expected_same, expected_similar = cfg.component_mixture_weights(
+                    same_effective_n[row_index],
+                    similar_effective_n[row_index],
+                    0.0 if similar_count[row_index] == 0 else similar_mean[row_index],
+                    int(same_count[row_index]),
+                    int(similar_count[row_index]),
+                )
+                adaptive_invalid[row_index] = (
+                    not np.isclose(same_mix[row_index], expected_same, atol=1e-6)
+                    or not np.isclose(
+                        similar_mix[row_index], expected_similar, atol=1e-6
+                    )
+                    or np.isfinite(route_factor[row_index])
+                    or not np.isfinite(pre_ratio[row_index])
+                )
+            elif adaptive_flag[row_index] == 1:
+                same_mass = same_effective_n[row_index] * route_factor[row_index]
+                similar_mass = (
+                    cfg.SIMILAR_OD_RELIABILITY_DISCOUNT
+                    * np.clip(similar_mean[row_index], 0.0, 1.0)
+                    * similar_effective_n[row_index]
+                )
+                expected_same = same_mass / (same_mass + similar_mass)
+                adaptive_invalid[row_index] = not (
+                    0 < same_count[row_index]
+                    <= cfg.ADAPTIVE_REWEIGHT_MAX_SAME_OD_COUNT
+                    and similar_count[row_index] > 0
+                    and np.isfinite(pre_ratio[row_index])
+                    and pre_ratio[row_index] < cfg.Q30_TO_Q50_AUDIT_MIN
+                    and np.isfinite(route_factor[row_index])
+                    and 0.0 < route_factor[row_index] <= 1.0 + 1e-6
+                    and np.isfinite(expected_same)
+                    and np.isclose(same_mix[row_index], expected_same, atol=1e-6)
+                    and np.isclose(
+                        similar_mix[row_index], 1.0 - expected_same, atol=1e-6
+                    )
+                )
+            else:
+                adaptive_invalid[row_index] = True
+        adaptive_invalid[~available] = (
+            (adaptive_flag[~available] != 0)
+            | np.isfinite(route_factor[~available])
+            | np.isfinite(pre_ratio[~available])
+        )
+        counters["quantile_adaptive_reweight_invalid_rows"] += int(
+            adaptive_invalid.sum()
         )
         values, counts = np.unique(
             data["max_match_level"].to_numpy(dtype=np.int8), return_counts=True

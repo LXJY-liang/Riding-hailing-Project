@@ -1,0 +1,36 @@
+{
+  "seed": 20261023,
+  "sample_size": 20,
+  "sampling_pool": "available",
+  "eligible_target_count": 4450758,
+  "chosen_target_ids": [
+    1165763,
+    2656299,
+    4185451,
+    3800673,
+    1404225,
+    4133018,
+    3652374,
+    2440492,
+    1408621,
+    1904380,
+    4231628,
+    4199525,
+    804909,
+    3318987,
+    758463,
+    1543339,
+    3875031,
+    4285997,
+    2409247,
+    966131
+  ],
+  "all_targets_passed": false,
+  "failed_targets": [
+    "audit_sample=9, target_id=1408621",
+    "audit_sample=14, target_id=3318987"
+  ],
+  "target_summary_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/audit_random_samples/seed_20261023_n20_available/1 随机目标与分层价格汇总.csv",
+  "price_detail_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/audit_random_samples/seed_20261023_n20_available/2 分层历史价格逐笔明细.csv",
+  "quantile_comparison_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/audit_random_samples/seed_20261023_n20_available/3 KDE的101维分位数对比.csv"
+}

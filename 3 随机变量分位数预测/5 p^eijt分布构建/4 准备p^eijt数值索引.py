@@ -6,8 +6,9 @@
 1. 区域字符串清洗和 region_index 映射；
 2. 历史订单按完成时间排序；
 3. 同 OD 历史的 CSR 索引；
-4. 第 4 层使用的“起点 + 时间状态”CSR 索引；
-5. 目标表的时间字段和区域编号派生。
+4. 第 4 层使用的“起点/全局 + 日期类型 + 时间位置”CSR 索引；
+5. 工作日、普通周末、节假日三类日期标记；
+6. 目标表的时间字段和区域编号派生。
 
 其中 CSR（compressed sparse row）由一个 order 数组和一个 offsets 数组
 组成。后续脚本通过整数切片直接取得候选，不再运行 pandas groupby，也
@@ -66,6 +67,7 @@ def managed_outputs() -> list[Path]:
         cfg.HISTORY_SLOT_FILE,
         cfg.HISTORY_DOW_FILE,
         cfg.HISTORY_WEEKEND_HOLIDAY_FILE,
+        cfg.HISTORY_DATE_TYPE_FILE,
         cfg.HISTORY_PRICE_FILE,
         cfg.HISTORY_TRIP_MILES_FILE,
         cfg.HISTORY_TRIP_SECONDS_FILE,
@@ -75,6 +77,10 @@ def managed_outputs() -> list[Path]:
         cfg.ORIGIN_TIME_STRICT_OFFSETS_FILE,
         cfg.ORIGIN_TIME_RELAXED_ORDER_FILE,
         cfg.ORIGIN_TIME_RELAXED_OFFSETS_FILE,
+        cfg.ORIGIN_DATE_TYPE_TIME_ORDER_FILE,
+        cfg.ORIGIN_DATE_TYPE_TIME_OFFSETS_FILE,
+        cfg.GLOBAL_DATE_TYPE_TIME_ORDER_FILE,
+        cfg.GLOBAL_DATE_TYPE_TIME_OFFSETS_FILE,
     ]
 
 
@@ -135,6 +141,19 @@ def build_history_arrays(region_to_index: dict[str, int]) -> dict[str, int]:
     slot = history["slot_in_day"].to_numpy(dtype=np.int16)
     dow = history["dow"].to_numpy(dtype=np.int8)
     weekend_holiday = history["is_weekend_or_holiday"].to_numpy(dtype=np.int8)
+    data_start = pd.Timestamp(cfg.DATA_START).normalize()
+    holiday_day_indices = {
+        int((pd.Timestamp(value).normalize() - data_start).days)
+        for value in cfg.HOLIDAY_DATES
+    }
+    date_type = np.where(dow >= 5, cfg.DATE_TYPE_WEEKEND, cfg.DATE_TYPE_WEEKDAY)
+    if holiday_day_indices:
+        date_type = np.where(
+            np.isin(day, list(holiday_day_indices)),
+            cfg.DATE_TYPE_HOLIDAY,
+            date_type,
+        )
+    date_type = date_type.astype(np.int8, copy=False)
     price = history["price"].to_numpy(dtype=np.float32)
     trip_miles = history["trip_miles"].to_numpy(dtype=np.float32)
     trip_seconds = history["trip_seconds"].to_numpy(dtype=np.float32)
@@ -146,6 +165,7 @@ def build_history_arrays(region_to_index: dict[str, int]) -> dict[str, int]:
     np.save(cfg.HISTORY_SLOT_FILE, slot)
     np.save(cfg.HISTORY_DOW_FILE, dow)
     np.save(cfg.HISTORY_WEEKEND_HOLIDAY_FILE, weekend_holiday)
+    np.save(cfg.HISTORY_DATE_TYPE_FILE, date_type)
     np.save(cfg.HISTORY_PRICE_FILE, price)
     np.save(cfg.HISTORY_TRIP_MILES_FILE, trip_miles)
     np.save(cfg.HISTORY_TRIP_SECONDS_FILE, trip_seconds)
@@ -195,12 +215,43 @@ def build_history_arrays(region_to_index: dict[str, int]) -> dict[str, int]:
     np.save(cfg.ORIGIN_TIME_RELAXED_ORDER_FILE, relaxed_order)
     np.save(cfg.ORIGIN_TIME_RELAXED_OFFSETS_FILE, relaxed_offsets)
 
+    origin_date_type_time_key = (
+        (
+            i_index.astype(np.int64) * cfg.DATE_TYPE_COUNT
+            + date_type.astype(np.int64)
+        )
+        * cfg.SLOTS_PER_DAY
+        + slot.astype(np.int64)
+    )
+    origin_date_type_time_groups = (
+        cfg.REGION_COUNT * cfg.DATE_TYPE_COUNT * cfg.SLOTS_PER_DAY
+    )
+    origin_dt_order, origin_dt_offsets = build_dense_csr(
+        origin_date_type_time_key,
+        origin_date_type_time_groups,
+    )
+    np.save(cfg.ORIGIN_DATE_TYPE_TIME_ORDER_FILE, origin_dt_order)
+    np.save(cfg.ORIGIN_DATE_TYPE_TIME_OFFSETS_FILE, origin_dt_offsets)
+
+    global_date_type_time_key = (
+        date_type.astype(np.int64) * cfg.SLOTS_PER_DAY + slot.astype(np.int64)
+    )
+    global_date_type_time_groups = cfg.DATE_TYPE_COUNT * cfg.SLOTS_PER_DAY
+    global_dt_order, global_dt_offsets = build_dense_csr(
+        global_date_type_time_key,
+        global_date_type_time_groups,
+    )
+    np.save(cfg.GLOBAL_DATE_TYPE_TIME_ORDER_FILE, global_dt_order)
+    np.save(cfg.GLOBAL_DATE_TYPE_TIME_OFFSETS_FILE, global_dt_offsets)
+
     return {
         "history_input_rows": int(input_rows),
         "history_rows": int(len(history)),
         "od_group_count": int(od_group_count),
         "strict_origin_time_group_count": int(strict_group_count),
         "relaxed_origin_time_group_count": int(relaxed_group_count),
+        "origin_date_type_time_group_count": int(origin_date_type_time_groups),
+        "global_date_type_time_group_count": int(global_date_type_time_groups),
     }
 
 
@@ -268,6 +319,15 @@ def build_target_table(region_to_index: dict[str, int]) -> dict[str, int]:
             data["target_weekend_or_holiday"] = (
                 (data["target_dow"] >= 5) | (data["target_is_holiday"] == 1)
             ).astype("int8")
+            data["target_date_type"] = np.where(
+                data["target_is_holiday"] == 1,
+                cfg.DATE_TYPE_HOLIDAY,
+                np.where(
+                    data["target_dow"] >= 5,
+                    cfg.DATE_TYPE_WEEKEND,
+                    cfg.DATE_TYPE_WEEKDAY,
+                ),
+            ).astype("int8")
             data["i_index"] = data["i_index"].astype("int16")
             data["j_index"] = data["j_index"].astype("int16")
             data["D_ijt_observed"] = data["D_ijt_observed"].astype("float32")
@@ -286,6 +346,7 @@ def build_target_table(region_to_index: dict[str, int]) -> dict[str, int]:
                     "target_dow",
                     "target_is_holiday",
                     "target_weekend_or_holiday",
+                    "target_date_type",
                     "D_ijt_observed",
                 ]
             ]
@@ -321,6 +382,7 @@ def main() -> None:
         cfg.NORMALIZED_NEIGHBOR_FILE,
         cfg.NEIGHBOR_MATRIX_FILE,
         cfg.TARGET_OD_FILE,
+        cfg.OD_ROAD_DISTANCE_FILE,
     ]
     missing = [str(path) for path in required if not path.exists()]
     if missing:

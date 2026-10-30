@@ -4,6 +4,8 @@
   "od_group_count": 641601,
   "strict_origin_time_group_count": 1076544,
   "relaxed_origin_time_group_count": 538272,
+  "origin_date_type_time_group_count": 230688,
+  "global_date_type_time_group_count": 288,
   "target_input_rows": 4457825,
   "target_rows": 4457825,
   "target_invalid_rows": 0,

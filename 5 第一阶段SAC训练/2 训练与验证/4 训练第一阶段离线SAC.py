@@ -86,7 +86,12 @@ def weighted_value(values: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
 
 
 def policy_reward(group, action, lambdas):
-    """在固定历史状态上计算当前策略即时结果；结果不进入历史数据集。"""
+    """在固定历史状态上计算当前策略即时结果。
+
+    乘客和司机机会约束均使用逐OD非负违反度 [g]_+。已满足约束的
+    OD违反度为0，不能用负残差抵消其他OD的正违反。结果只用于
+    计算当前策略回报，不写回固定历史数据集。
+    """
 
     context, details = net.region_action_context(group, action)
     demand_mask = group["base_demand"] > 0
@@ -101,13 +106,15 @@ def policy_reward(group, action, lambdas):
         1.0 - cfg.DRIVER_BETA - details["driver_final"],
         torch.zeros_like(details["driver_final"]),
     )
+    g_passenger = torch.relu(g_passenger_raw)
+    g_driver = torch.relu(g_driver_raw)
     profit = (
         cfg.PLATFORM_RATE * details["price"] - details["subsidy"]
     ) * details["completed"]
     reward = (
         profit
-        - lambdas["passenger"] * g_passenger_raw
-        - lambdas["driver"] * g_driver_raw
+        - lambdas["passenger"] * g_passenger
+        - lambdas["driver"] * g_driver
     ) * cfg.REWARD_SCALE
     return context, reward, details
 
@@ -201,9 +208,15 @@ def update_sac(models, optimizers, samples, device, lambdas):
 
 
 def update_lambdas(lambdas, passenger_values, driver_values):
+    """用当前四小时窗口内所有有效OD的平均非负违反度更新全局乘子。
+
+    这里再执行一次 maximum(., 0)作为防御性检查，防止调用方误传
+    有符号残差后重新出现正负抵消。
+    """
     for name, values in (("passenger", passenger_values), ("driver", driver_values)):
         if values:
-            mean = float(np.concatenate(values).mean())
+            violations = np.maximum(np.concatenate(values), 0.0)
+            mean = float(violations.mean())
             lambdas[name] = float(np.clip(lambdas[name] + cfg.LAMBDA_LR * mean, 0.0, cfg.LAMBDA_MAX))
     passenger_values.clear()
     driver_values.clear()
@@ -285,7 +298,8 @@ def main() -> None:
         "supply_fulfillment_rate", "critic_loss", "actor_loss", "alpha",
         "passenger_acceptance_mean", "passenger_violation_rate", "driver_single_acceptance_mean",
         "passenger_violation_od_rate", "driver_final_acceptance_mean", "driver_violation_rate",
-        "driver_violation_od_rate", "hard_infeasible_od_rate", "price_ratio_mean",
+        "driver_violation_od_rate", "passenger_violation_mean", "passenger_violation_max",
+        "driver_violation_mean", "driver_violation_max", "hard_infeasible_od_rate", "price_ratio_mean",
         "subsidy_ratio_mean", "total_subsidy", "lambda_passenger", "lambda_driver",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as stream:
@@ -298,8 +312,11 @@ def main() -> None:
                 "passenger_acceptance", "driver_single", "driver_final", "passenger_violation",
                 "driver_violation", "demand_weight", "price_ratio", "subsidy_ratio", "od_weight", "subsidy",
                 "passenger_active_od", "driver_active_od", "passenger_violation_od",
-                "driver_violation_od", "hard_infeasible_od",
+                "driver_violation_od", "passenger_violation_amount",
+                "driver_violation_amount", "hard_infeasible_od",
             )}
+            totals["passenger_violation_max"] = 0.0
+            totals["driver_violation_max"] = 0.0
             losses, actor_losses = [], []
             passenger_window: list[np.ndarray] = []
             driver_window: list[np.ndarray] = []
@@ -346,14 +363,33 @@ def main() -> None:
                         totals["driver_violation_od"] += int(
                             np.sum((result["g_driver"] > 0) & driver_active)
                         )
+                        passenger_violations = result["g_passenger"][passenger_active]
+                        driver_violations = result["g_driver"][driver_active]
+                        totals["passenger_violation_amount"] += float(
+                            passenger_violations.sum()
+                        )
+                        totals["driver_violation_amount"] += float(
+                            driver_violations.sum()
+                        )
+                        if passenger_violations.size:
+                            totals["passenger_violation_max"] = max(
+                                totals["passenger_violation_max"],
+                                float(passenger_violations.max()),
+                            )
+                        if driver_violations.size:
+                            totals["driver_violation_max"] = max(
+                                totals["driver_violation_max"],
+                                float(driver_violations.max()),
+                            )
                         totals["hard_infeasible_od"] += int(result["hard_infeasible"].sum())
                         active = demand > 0
                         totals["price_ratio"] += float(np.sum(result["price"][active] / result["p_ref"][active]))
                         totals["subsidy_ratio"] += float(np.sum(result["subsidy"][active] / result["p_ref"][active]))
                         totals["od_weight"] += int(active.sum())
                         totals["subsidy"] += float(np.sum(result["subsidy"] * result["completed"]))
-                        passenger_window.append(result["g_passenger_raw"][result["passenger_constraint_active"]])
-                        driver_window.append(result["g_driver_raw"][result["driver_constraint_active"]])
+                        # 乘子与Actor回报使用同一口径：逐OD非负违反度。
+                        passenger_window.append(passenger_violations)
+                        driver_window.append(driver_violations)
                     global_step += 1
                     if global_step % cfg.LAMBDA_UPDATE_INTERVAL_STEPS == 0:
                         update_lambdas(lambdas, passenger_window, driver_window)
@@ -386,6 +422,10 @@ def main() -> None:
                 "driver_final_acceptance_mean": totals["driver_final"] / demand_total,
                 "driver_violation_rate": totals["driver_violation"] / demand_total,
                 "driver_violation_od_rate": totals["driver_violation_od"] / max(totals["driver_active_od"], 1),
+                "passenger_violation_mean": totals["passenger_violation_amount"] / max(totals["passenger_active_od"], 1),
+                "passenger_violation_max": totals["passenger_violation_max"],
+                "driver_violation_mean": totals["driver_violation_amount"] / max(totals["driver_active_od"], 1),
+                "driver_violation_max": totals["driver_violation_max"],
                 "hard_infeasible_od_rate": totals["hard_infeasible_od"] / max(totals["passenger_active_od"], 1),
                 "price_ratio_mean": totals["price_ratio"] / od_total,
                 "subsidy_ratio_mean": totals["subsidy_ratio"] / od_total,
@@ -412,6 +452,8 @@ def main() -> None:
                     "cross_day_transition_count": dataset_audit["cross_day_transitions"],
                     "split_boundary_terminal": True,
                     "gradient_updates_per_time_step": cfg.GRADIENT_UPDATES_PER_TIME_STEP,
+                    "nonnegative_constraint_aggregation": True,
+                    "lambda_update_interval_steps": cfg.LAMBDA_UPDATE_INTERVAL_STEPS,
                     "demand_completion_rate": cfg.DEMAND_COMPLETION_RATE,
                     "supply_quantile": cfg.SUPPLY_QUANTILE,
                     "supply_utilization": cfg.SUPPLY_UTILIZATION,

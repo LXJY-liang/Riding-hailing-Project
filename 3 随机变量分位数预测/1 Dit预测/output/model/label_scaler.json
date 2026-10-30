@@ -1,6 +1,6 @@
 {
-  "label_mean": 0.552395224571228,
-  "label_std": 0.9355245232582092,
+  "label_mean": 0.5516945719718933,
+  "label_std": 0.934863269329071,
   "use_log1p": true,
   "use_standardization": true
 }

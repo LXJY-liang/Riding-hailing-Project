@@ -8,7 +8,7 @@
 1. 196 条异常目标的基本信息、101维分位数、带宽、混合权重和诊断标记；
 2. 每个目标实际进入 KDE 的每一个历史价格、匹配层级、里程和最终权重；
 3. 按目标和匹配层级统计的价格分布；
-4. 每个目标一行，分别列出第1至第4层实际选入的全部价格；
+4. 每个目标一行，分别列出第1、2、3、4A、4B、4C实际选入的价格；
 5. 异常成因汇总 JSON。
 
 主要诊断规则：
@@ -140,20 +140,44 @@ def main() -> None:
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=False)
 
-    required = [
-        cfg.STRUCTURAL_AUDIT_DIR,
-        cfg.SAMPLE_DATASET,
-        cfg.PE_DISTRIBUTION_DATASET,
-    ]
+    required = [cfg.SAMPLE_DATASET, cfg.PE_DISTRIBUTION_DATASET]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         raise FileNotFoundError("缺少诊断输入：\n" + "\n".join(missing))
+
+    audit_parts = (
+        list(cfg.STRUCTURAL_AUDIT_DIR.glob("*.parquet"))
+        if cfg.STRUCTURAL_AUDIT_DIR.exists()
+        else []
+    )
+    if not audit_parts:
+        report = {
+            "rule": "q30 < 0.30 * q50",
+            "target_count": 0,
+            "message": "重建结果中没有发现满足该规则的结构异常目标。",
+        }
+        report_file = output_dir / "6_异常原因汇总.json"
+        report_file.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
 
     extreme = ds.dataset(cfg.STRUCTURAL_AUDIT_DIR, format="parquet").to_table().to_pandas()
     extreme = extreme.loc[extreme["q50_q30_extreme_flag"].eq(1)].copy()
     extreme = extreme.sort_values("target_id", kind="mergesort").reset_index(drop=True)
     if extreme.empty:
-        raise ValueError("没有找到 q30 < 0.30*q50 的异常目标。")
+        report = {
+            "rule": "q30 < 0.30 * q50",
+            "target_count": 0,
+            "message": "重建结果中没有发现满足该规则的结构异常目标。",
+        }
+        report_file = output_dir / "6_异常原因汇总.json"
+        report_file.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
     if not (
         extreme["pe_q0300"] < 0.30 * extreme["pe_q0500"]
     ).all():
@@ -164,7 +188,7 @@ def main() -> None:
 
     layer_weights = np.asarray(
         [0.0, cfg.LAYER_WEIGHTS[1], cfg.LAYER_WEIGHTS[2],
-         cfg.LAYER_WEIGHTS[3], cfg.LAYER_WEIGHTS[4]],
+         cfg.LAYER_WEIGHTS[3], cfg.LAYER_WEIGHTS[4], cfg.LAYER_WEIGHTS[5]],
         dtype=np.float64,
     )
 
@@ -178,23 +202,26 @@ def main() -> None:
         sample = samples.loc[target_id]
         prices = np.asarray(sample["sample_prices"], dtype=np.float64)
         levels = np.asarray(sample["sample_levels"], dtype=np.int8)
+        sublevels = np.asarray(sample["sample_sublevels"], dtype="U2")
         miles = np.asarray(sample["sample_trip_miles"], dtype=np.float64)
         similarities = np.asarray(
             sample["sample_similarity_weights"], dtype=np.float64
         )
-        lengths = {len(prices), len(levels), len(miles), len(similarities)}
+        lengths = {
+            len(prices), len(levels), len(sublevels), len(miles), len(similarities)
+        }
         if lengths != {int(sample["sample_count"])}:
             raise ValueError(f"target_id={target_id} 的样本列表长度不一致。")
 
         same_mask = levels <= 3
-        similar_mask = levels == 4
+        similar_mask = levels >= 4
         raw_weight = np.where(same_mask, layer_weights[levels], similarities)
         normalized_weight = np.zeros(len(prices), dtype=np.float64)
         final_weight = np.zeros(len(prices), dtype=np.float64)
         if same_mask.any():
             normalized_weight[same_mask] = raw_weight[same_mask] / raw_weight[same_mask].sum()
             final_weight[same_mask] = (
-                float(sample["same_od_mixture_weight"])
+                float(row.same_od_mixture_weight)
                 * normalized_weight[same_mask]
             )
         if similar_mask.any():
@@ -202,7 +229,7 @@ def main() -> None:
                 raw_weight[similar_mask] / raw_weight[similar_mask].sum()
             )
             final_weight[similar_mask] = (
-                float(sample["similar_od_mixture_weight"])
+                float(row.similar_od_mixture_weight)
                 * normalized_weight[similar_mask]
             )
 
@@ -265,8 +292,14 @@ def main() -> None:
                 "same_od_sample_count": int(same_mask.sum()),
                 "similar_od_sample_count": int(similar_mask.sum()),
                 "max_match_level": int(row.max_match_level),
-                "same_od_mixture_weight": float(sample["same_od_mixture_weight"]),
-                "similar_od_mixture_weight": float(sample["similar_od_mixture_weight"]),
+                "same_od_mixture_weight": float(row.same_od_mixture_weight),
+                "similar_od_mixture_weight": float(row.similar_od_mixture_weight),
+                "adaptive_reweight_flag": int(row.adaptive_reweight_flag),
+                "same_route_consistency_factor": (
+                    np.nan
+                    if row.same_route_consistency_factor is None
+                    else float(row.same_route_consistency_factor)
+                ),
                 "same_od_bandwidth_usd": same_bandwidth,
                 "similar_od_bandwidth_usd": similar_bandwidth,
                 "selected_price_min": all_stats["min"],
@@ -291,7 +324,7 @@ def main() -> None:
             }
         )
 
-        # 用户审核用的“宽表”：每个目标只占一行，四层价格互不混合。
+        # 用户审核用的“宽表”：每个目标只占一行，各层价格互不混合。
         # selected_order 版保留构建数据集中的原始顺序；sorted 版方便直观
         # 查看同一层的价格范围和孤立极端值。
         price_list_row: dict[str, object] = {
@@ -317,12 +350,26 @@ def main() -> None:
             price_list_row[f"layer{level}_trip_miles_selected_order"] = (
                 number_list_json(miles[mask])
             )
+        for sublevel in ("4A", "4B", "4C", "5A", "5B", "5C", "5D", "5E"):
+            mask = sublevels == sublevel
+            key = sublevel.lower()
+            price_list_row[f"layer{key}_count"] = int(mask.sum())
+            price_list_row[f"layer{key}_prices_selected_order"] = (
+                number_list_json(prices[mask])
+            )
+            price_list_row[f"layer{key}_prices_sorted"] = number_list_json(
+                np.sort(prices[mask])
+            )
+            price_list_row[f"layer{key}_trip_miles_selected_order"] = (
+                number_list_json(miles[mask])
+            )
         layer_price_lists.append(price_list_row)
 
-        for number, (price, level, mile, similarity, raw, normalized, final) in enumerate(
+        for number, (price, level, sublevel, mile, similarity, raw, normalized, final) in enumerate(
             zip(
                 prices,
                 levels,
+                sublevels,
                 miles,
                 similarities,
                 raw_weight,
@@ -340,6 +387,7 @@ def main() -> None:
                     "selected_order": number,
                     "history_price_usd": float(price),
                     "match_level": int(level),
+                    "match_sublevel": str(sublevel),
                     "kde_component": "same_od" if int(level) <= 3 else "similar_od",
                     "history_trip_miles": float(mile),
                     "distance_similarity_weight": float(similarity),
@@ -380,11 +428,11 @@ def main() -> None:
          "q30_to_q50_ratio", "q50_to_q30_ratio", "q50_q30_extreme_flag"]
     ].copy()
 
-    summary_file = output_dir / "1_196条异常目标诊断汇总.csv"
-    detail_file = output_dir / "2_196条异常目标构成价格明细.csv"
-    layer_file = output_dir / "3_196条异常目标分层价格统计.csv"
-    quantile_file = output_dir / "4_196条异常目标101维分位数.csv"
-    price_list_file = output_dir / "5_196条异常目标四层具体价格清单.csv"
+    summary_file = output_dir / "1_异常目标诊断汇总.csv"
+    detail_file = output_dir / "2_异常目标构成价格明细.csv"
+    layer_file = output_dir / "3_异常目标分层价格统计.csv"
+    quantile_file = output_dir / "4_异常目标101维分位数.csv"
+    price_list_file = output_dir / "5_异常目标分层具体价格清单.csv"
     report_file = output_dir / "6_异常原因汇总.json"
     summary.to_csv(summary_file, index=False, encoding="utf-8-sig")
     detail.to_csv(detail_file, index=False, encoding="utf-8-sig")
@@ -423,7 +471,7 @@ def main() -> None:
             "constituent_prices": str(detail_file),
             "layer_statistics": str(layer_file),
             "quantiles": str(quantile_file),
-            "four_layer_price_lists": str(price_list_file),
+            "layered_price_lists": str(price_list_file),
         },
     }
     report_file.write_text(

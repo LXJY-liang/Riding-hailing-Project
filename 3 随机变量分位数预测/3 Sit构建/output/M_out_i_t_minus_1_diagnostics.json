@@ -1,0 +1,12 @@
+{
+  "input_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/3_3 区域-15min聚合（补全空值）结果.parquet",
+  "output_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/M_out_i_t_minus_1.parquet",
+  "rows": 2306880,
+  "region_count": 801,
+  "time_count": 2880,
+  "boundary_rows_without_previous_slot": 801,
+  "M_out_i_t_minus_1_total_non_boundary": 5810899,
+  "excluded_last_slot_departures": 1546,
+  "time_step_minutes": 15,
+  "data_scope": "Chicago internal OD historical completed transactions"
+}

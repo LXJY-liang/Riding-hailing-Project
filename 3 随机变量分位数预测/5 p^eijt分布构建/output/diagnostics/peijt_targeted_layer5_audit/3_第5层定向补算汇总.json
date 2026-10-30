@@ -1,0 +1,37 @@
+{
+  "input_unavailable_count": 7067,
+  "recovered_count": 3719,
+  "remaining_unavailable_count": 3348,
+  "affected_part_count": 223,
+  "unchanged_available_target_count": 4450758,
+  "stage_summary": [
+    {
+      "stage": "test",
+      "target_count": 178,
+      "recovered_count": 175,
+      "remaining_unavailable": 3,
+      "demand": 183.0
+    },
+    {
+      "stage": "valid",
+      "target_count": 148,
+      "recovered_count": 148,
+      "remaining_unavailable": 0,
+      "demand": 150.0
+    },
+    {
+      "stage": "train",
+      "target_count": 964,
+      "recovered_count": 940,
+      "remaining_unavailable": 24,
+      "demand": 980.0
+    },
+    {
+      "stage": "warmup",
+      "target_count": 5777,
+      "recovered_count": 2456,
+      "remaining_unavailable": 3321,
+      "demand": 6542.0
+    }
+  ]
+}

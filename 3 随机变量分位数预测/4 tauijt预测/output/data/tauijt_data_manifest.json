@@ -1,0 +1,32 @@
+{
+  "generated_at_utc": "2026-10-22T13:54:32.574395+00:00",
+  "feature_data_path": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/2 模型特征构建/4 tauijt特征构造（结果）.parquet",
+  "feature_data_mtime_ns": 1792673445807493644,
+  "cleaned_od_panel_path": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/2_3 OD-15min聚合（补全时间、不管没出现的OD）结果.parquet",
+  "cleaned_od_panel_mtime_ns": 1792465530728219844,
+  "split_counts": {
+    "train": 3549356,
+    "valid": 380811,
+    "test": 527658
+  },
+  "split_ranges": {
+    "train": [
+      "2024-06-01 00:00:00",
+      "2024-06-24 23:45:00"
+    ],
+    "valid": [
+      "2024-06-25 00:00:00",
+      "2024-06-27 23:45:00"
+    ],
+    "test": [
+      "2024-06-28 00:00:00",
+      "2024-06-30 23:45:00"
+    ]
+  },
+  "label_scaler": {
+    "label_mean": 2.7431310230276647,
+    "label_std": 0.5898680839664207,
+    "use_log1p": true,
+    "use_standardization": true
+  }
+}

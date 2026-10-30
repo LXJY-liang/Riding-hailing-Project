@@ -1,59 +1,67 @@
-# Vit 101维分位数预训练与编码导出
+# Vit预训练和离线SAC输入生成
 
-Vit预训练使用历史可见信息，不依赖Dit和tauijt预测。所有结构化特征先组成文本Prompt，再Tokenize并输入Qwen3-4B+Vit专用LoRA+101维分位数头。
+## 固定口径
 
-默认首次实验抽样25,000个训练状态、5,000个验证状态，训练1轮；只在Qwen最后4层的q/v投影上训练LoRA。这用于给SAC内部的Vit TD更新提供合理初值。后续正式扩大样本时，可通过`VIT_TRAIN_MAX_SAMPLES`和`VIT_VALID_MAX_SAMPLES`覆盖默认值。
+- 监督标签：6月1日至6月24日，每个 `(i,t)` 用1000条代表性司机轨迹得到1000个收益样本，直接计算101维分位数。
+- 训练集：6月1日至6月24日全部 1,845,504 个状态，不抽样。
+- 独立验证集：6月25日至6月27日全部230,688个状态。训练进度达到20%、40%、
+  60%、80%和100%时，始终使用固定随机种子抽取的同一个十分之一验证子集选择最佳模型；
+  训练结束后用最佳模型评估完整验证集。
+- 预测期：6月11日至6月24日，输出每日 `96×801×101` 的冻结Vit分布。
+- 6月11—24日的Prompt和数值头使用新Dit/Sit预测分布。Sit来自基于U分布重构的随机供给。
+- 6月1—10日的新Sit分布尚不存在，训练特征仅使用目标日之前的历史数据构造因果回退分布；6月1日显式标记为无可用更早历史。
+- 轨迹策略为“无单原地等待、抽到历史成交订单后随订单转移”，不额外模拟拒单或主动空驶调度；历史成交订单的净收益可为负，所以Vit不强制非负。
 
-## 1. 本地CPU数据准备
+## 目录职责
 
-在项目根目录依次运行：
+`0 上游标签与基础特征`：生成Oracle标签和只使用过去订单的司机收益特征；产物统一保存在本目录的`output`中。
 
-```bash
-python "5 第一阶段SAC训练/1 训练前的准备/2 构建历史基础供给代理.py"
-python "4 Vit预训练模型/1 数据准备/2 构建101维Vit轨迹分布标签.py" --splits train valid
-python "4 Vit预训练模型/1 数据准备/3 构建历史需求供给与邻近区域特征.py" --splits train valid
-python "4 Vit预训练模型/1 数据准备/4 构建历史OD目的地与关联区域特征.py" --splits train valid
-python "4 Vit预训练模型/1 数据准备/5 构建Vit文本Prompt与预训练样本.py" --splits train valid
-python "4 Vit预训练模型/1 数据准备/6 TokenizeVit预训练样本.py" --splits train valid
-```
+`1 数据准备`：数据准备产物统一保存在本目录的`output`中。
 
-这些步骤不训练4B模型，可以在Mac本地运行。通常约需30–90分钟，主要时间用于全量Prompt文本化和Tokenize。
+1. `1 Vit预训练配置.py`：统一路径、日期、分位点和模型参数。
+2. `2 构建Vit输入特征.py`：接入新Dit/Sit分布，构建历史收益、目的地、行程时长和邻近区域特征。
+3. `3 构建Vit中文Prompt与全量样本.py`：生成中文自然语言Prompt，直接读取新的101维Oracle标签，按日保存全量样本。
+4. `4 TokenizeVit全量训练样本.py`：按日Tokenize全量样本，以避免一次把1,845,504条长Prompt全部载入内存。
+5. `5 检查Vit训练数据.py`：检查行数、日期、分位数单调性、中文Prompt和新D/S来源。
+6. `6 随机查看3个Vit Prompt.py`：从全量训练样本中等概率抽取3个完整Prompt，同时显示对应的0.5%、50%和99.5% Oracle分位数。
 
-## 2. 服务器GPU预训练
+`2 训练与评估`：定义、训练、拟合诊断、导出512维编码，并生成SAC使用的101维预测分布；产物统一保存在本目录的`output`中。
 
-将完整的`4 Vit预训练模型`、Qwen基座模型与相关历史数据上传到项目对应路径。服务器需要`torch`、`transformers`、`peft`、`datasets`、`pandas`和`pyarrow`。
+## 本地数据准备
 
-如果SAC日级episode尚未生成，先只训练和验证Vit：
-
-```bash
-RIDING_HAILING_PROJECT_ROOT="/root/autodl-tmp/Riding hailing_Project" \
-VIT_RUN_MODE=train \
-AUTO_SHUTDOWN=1 \
-bash "4 Vit预训练模型/2 训练与评估/5 在服务器预训练并导出.sh"
-```
-
-启动脚本会自动创建tmux后台会话并输出日志路径。实时查看：
+等1000条轨迹标签程序完成、`.tmp` 文件消失后执行：
 
 ```bash
-tail -f '启动时显示的完整日志路径'
+python "4 Vit预训练模型/0 上游标签与基础特征/2 历史司机收益基础特征/1 司机历史收益特征构造.py"
+python "4 Vit预训练模型/0 上游标签与基础特征/2 历史司机收益基础特征/2 Vit基础特征构造.py"
+python "4 Vit预训练模型/1 数据准备/2 构建Vit输入特征.py"
+python "4 Vit预训练模型/1 数据准备/3 构建Vit中文Prompt与全量样本.py"
+python "4 Vit预训练模型/1 数据准备/6 随机查看3个Vit Prompt.py" --seed 42
+python "4 Vit预训练模型/1 数据准备/5 检查Vit训练数据.py"
+python "4 Vit预训练模型/1 数据准备/4 TokenizeVit全量训练样本.py"
 ```
 
-按`Ctrl+C`只会退出日志查看，不会中止训练。Mac断网、VPN断开、SSH退出或Mac关机都不会影响tmux中的任务。`AUTO_SHUTDOWN=1`会在流程结束或异常退出后关闭服务器。
-
-RTX 4090上，当前25,000样本、1轮LoRA预训练预计约8–24小时。实际时间受Prompt动态padding、PyTorch版本和显存速度影响，以开始后前200个batch的平均速度为准。
-
-## 3. 导出SAC所需状态编码
-
-编码导出需要SAC日级episode，因为代码只编码SAC动态轨迹可能访问的出发区域、等待状态和目的地状态，避免对801个区域×96个时段全量运行Qwen。
-
-当Dit、tauijt预测完成并已运行“5 整理日级训练输入.py”后，执行：
+训练集Tokenized完成后，验证集可独立构建，不会覆盖训练产物：
 
 ```bash
-RIDING_HAILING_PROJECT_ROOT="/root/autodl-tmp/Riding hailing_Project" \
-VIT_RUN_MODE=export \
-VIT_EXPORT_SPLITS=train \
-AUTO_SHUTDOWN=1 \
-bash "4 Vit预训练模型/2 训练与评估/5 在服务器预训练并导出.sh"
+python "4 Vit预训练模型/0 上游标签与基础特征/1 司机轨迹Oracle构造/2 构建司机未来价值Vit分布.py" --split valid
+python "4 Vit预训练模型/1 数据准备/2 构建Vit输入特征.py" --split valid
+python "4 Vit预训练模型/1 数据准备/3 构建Vit中文Prompt与全量样本.py" --split valid
+python "4 Vit预训练模型/1 数据准备/4 TokenizeVit全量训练样本.py" --split valid
 ```
 
-主实验暂时只有训练集episode时，使用`VIT_EXPORT_SPLITS=train`；验证集episode准备好后，再单独使用`VIT_EXPORT_SPLITS=valid`导出。如果episode在预训练前已经全部准备好，可以将`VIT_RUN_MODE`设为`all`，一次连续完成预训练、验证和导出。稀疏导出预计约4–16小时，最终以episode实际涉及的区域—时段数量和日志速度为准。
+验证Tokenized完成后会原子生成`vit_valid_parts/_READY.json`。服务器训练启动前会检查
+24个训练分片、3个验证分片和READY标记；任何一项缺失都会立即报错并拒绝训练。
+
+## 服务器训练和导出
+
+```bash
+bash "4 Vit预训练模型/2 训练与评估/6 在服务器预训练并导出.sh"
+```
+
+最终结果位于 `4 Vit预训练模型/2 训练与评估/output/prediction/frozen_vit`。新结果生成后，`5 第一阶段SAC训练`会自动优先读取该目录；在新结果生成前，仍会回退到现有旧结果，不中断当前SAC程序。
+
+## 评估边界
+
+6月25—27日完整验证集用于独立评估；6月11—24日的最终Vit输出属于训练日期内预测，
+这一点会在导出元数据中保留。

@@ -1,0 +1,11 @@
+{
+  "input_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/3_3 区域-15min聚合（补全空值）结果.parquet",
+  "output_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/M_arrive_it.parquet",
+  "rows": 2306880,
+  "region_count": 801,
+  "time_count": 2880,
+  "M_arrive_it_total": 5810898,
+  "positive_arrival_rows": 693802,
+  "time_definition": "Trip End Timestamp falls in current 15-minute slot t",
+  "data_scope": "Chicago internal OD historical completed transactions"
+}

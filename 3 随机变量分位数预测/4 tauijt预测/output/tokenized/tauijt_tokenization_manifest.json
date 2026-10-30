@@ -1,0 +1,17 @@
+{
+  "generated_at_utc": "2026-10-22T14:17:39.587477+00:00",
+  "data_manifest_path": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/4 tauijt预测/output/data/tauijt_data_manifest.json",
+  "data_manifest_mtime_ns": 1792677272575810333,
+  "base_model_path": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/0 基座模型_Qwen3-4B-Base",
+  "max_length": 512,
+  "split_counts": {
+    "train": 3549356,
+    "valid": 380811,
+    "test": 527658
+  },
+  "tokenized_paths": {
+    "train": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/4 tauijt预测/output/tokenized/tauijt_train_tokenized",
+    "valid": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/4 tauijt预测/output/tokenized/tauijt_valid_tokenized",
+    "test": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/4 tauijt预测/output/tokenized/tauijt_test_tokenized"
+  }
+}

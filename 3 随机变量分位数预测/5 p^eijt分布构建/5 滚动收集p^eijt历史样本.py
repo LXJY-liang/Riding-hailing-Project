@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 """滚动收集每个 (i,j,t) 的历史接受价格代理样本。
 
-本脚本只完成四层样本选择、两个分布的 Silverman 带宽及混合权重准备，
+本脚本只完成分层样本选择、两个分布的 Silverman 带宽及混合权重准备，
 不计算 KDE 分位数。
 所有字符串清洗、区域映射、历史排序和大分组索引均已由第 4 个脚本完成。
 
 第 1—3 层组成“相同 OD”分布，保留 1.0/0.9/0.8 的层内权重；
-第 4A、4B 层合并为“同时间状态+相似实际行程里程”分布。
-第 4 层内部按里程相似度加权；两个 KDE 的最终混合权重由有效
+第 4A、4B、4C 层以及只对不可用目标启用的第 5A—5E 规则，合并为
+“相似时间状态+相似实际行程里程”分布。相似 OD 成分内部按里程
+相似度加权；两个 KDE 的最终混合权重由有效
 样本量和相似度共同决定，并限制第 4 层的最大整体权重。
+
+超短距离规则从第1层开始统一生效。第5层中的5E不是在5D失败后
+才运行的独立回退，而是5A—5D每次检索时并行生效的绝对距离容差
+分支：只有未通过比例距离、但通过超短距离绝对容差的订单才标为5E。
 
 在 PyCharm 终端中使用以下命令以 4 个进程断点续算：
 
@@ -38,6 +43,7 @@ import json
 import multiprocessing as mp
 import shutil
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -111,7 +117,14 @@ class CandidateSet:
     holiday_relaxed: bool = False
     target_reference_trip_miles: float = np.nan
     target_distance_sample_count: int = 0
+    target_distance_reference_source: int = 0
     distance_reference_unavailable: bool = False
+    self_route_rejected_count: int = 0
+    target_distance_rejected_count: int = 0
+    self_short_absolute_accepted_count: int = 0
+    target_short_absolute_accepted_count: int = 0
+    fallback_attempted: bool = False
+    fallback_final_level: int = 0
 
     @classmethod
     def empty(cls) -> "CandidateSet":
@@ -122,8 +135,9 @@ class CandidateSet:
         candidates: np.ndarray,
         level: int,
         completion_ns: np.ndarray,
-        sublevel: str,
+        sublevel: str | np.ndarray,
         similarities: np.ndarray | None = None,
+        preserve_order: bool = False,
     ) -> None:
         if len(self.indices) >= cfg.N_MAX or len(candidates) == 0:
             return
@@ -134,7 +148,16 @@ class CandidateSet:
         similarities = np.asarray(similarities, dtype=np.float64)
         if len(similarities) != len(candidates):
             raise ValueError("候选样本与相似度长度不一致。")
-        order = np.argsort(completion_ns[candidates], kind="stable")[::-1]
+        if isinstance(sublevel, str):
+            sublevels = np.full(len(candidates), sublevel, dtype="U2")
+        else:
+            sublevels = np.asarray(sublevel, dtype="U2")
+            if len(sublevels) != len(candidates):
+                raise ValueError("候选样本与子层级长度不一致。")
+        if preserve_order:
+            order = np.arange(len(candidates), dtype=np.int64)
+        else:
+            order = np.argsort(completion_ns[candidates], kind="stable")[::-1]
         for position in order:
             raw_index = candidates[position]
             index = int(raw_index)
@@ -143,7 +166,7 @@ class CandidateSet:
             self.selected.add(index)
             self.indices.append(index)
             self.levels.append(level)
-            self.sublevels.append(sublevel)
+            self.sublevels.append(str(sublevels[position]))
             self.similarities.append(float(similarities[position]))
             if len(self.indices) >= cfg.N_MAX:
                 break
@@ -167,6 +190,7 @@ class RollingSampleCollector:
         self.weekend_holiday = np.load(
             cfg.HISTORY_WEEKEND_HOLIDAY_FILE, mmap_mode=mmap
         )
+        self.date_type = np.load(cfg.HISTORY_DATE_TYPE_FILE, mmap_mode=mmap)
         self.price = np.load(cfg.HISTORY_PRICE_FILE, mmap_mode=mmap)
         self.trip_miles = np.load(cfg.HISTORY_TRIP_MILES_FILE, mmap_mode=mmap)
         self.trip_seconds = np.load(cfg.HISTORY_TRIP_SECONDS_FILE, mmap_mode=mmap)
@@ -184,7 +208,33 @@ class RollingSampleCollector:
         self.relaxed_offsets = np.load(
             cfg.ORIGIN_TIME_RELAXED_OFFSETS_FILE, mmap_mode=mmap
         )
+        self.origin_dt_order = np.load(
+            cfg.ORIGIN_DATE_TYPE_TIME_ORDER_FILE, mmap_mode=mmap
+        )
+        self.origin_dt_offsets = np.load(
+            cfg.ORIGIN_DATE_TYPE_TIME_OFFSETS_FILE, mmap_mode=mmap
+        )
+        self.global_dt_order = np.load(
+            cfg.GLOBAL_DATE_TYPE_TIME_ORDER_FILE, mmap_mode=mmap
+        )
+        self.global_dt_offsets = np.load(
+            cfg.GLOBAL_DATE_TYPE_TIME_OFFSETS_FILE, mmap_mode=mmap
+        )
         self.neighbor_matrix = np.load(cfg.NEIGHBOR_MATRIX_FILE, mmap_mode=mmap)
+
+        road = pd.read_parquet(
+            cfg.OD_ROAD_DISTANCE_FILE,
+            columns=["i_index", "j_index", "d_map_miles"],
+        )
+        self.road_distance = np.full(
+            (cfg.REGION_COUNT, cfg.REGION_COUNT), np.nan, dtype=np.float32
+        )
+        self.road_distance[
+            road["i_index"].to_numpy(dtype=np.int64),
+            road["j_index"].to_numpy(dtype=np.int64),
+        ] = road["d_map_miles"].to_numpy(dtype=np.float32)
+        if np.any(~np.isfinite(self.road_distance) | (self.road_distance <= 0.0)):
+            raise ValueError("静态道路距离矩阵存在缺失或非正值。")
 
         neighbors = pd.read_parquet(
             cfg.NORMALIZED_NEIGHBOR_FILE,
@@ -261,87 +311,289 @@ class RollingSampleCollector:
             & (speed_mph <= cfg.MAX_VALID_SPEED_MPH)
         )
 
-    def _target_reference_trip_miles(
-        self, same_od: np.ndarray
-    ) -> tuple[float, int]:
-        if len(same_od) == 0:
-            return np.nan, 0
+    @lru_cache(maxsize=500_000)
+    def _distance_reference(
+        self,
+        i: int,
+        j: int,
+        target_ns: int,
+    ) -> tuple[float, int, int]:
+        """返回目标时刻可用的 OD 距离基准、样本数和来源代码。
+
+        来源代码：1=静态道路距离，2=历史中位数向道路距离收缩，
+        3=样本充分的滚动历史中位数。任何历史统计都严格限制为
+        completion_time < target_ns。
+        """
+
+        same_od = self._od_prefix(i, j, target_ns)
         valid = same_od[self._valid_route_mask(same_od)]
         count = int(len(valid))
-        if count < cfg.MIN_TARGET_DISTANCE_HISTORY:
-            return np.nan, count
-        return float(np.median(self.trip_miles[valid])), count
+        road = float(self.road_distance[i, j])
+        if count >= cfg.DISTANCE_DIRECT_HISTORY_THRESHOLD:
+            return float(np.median(self.trip_miles[valid])), count, 3
+        if count >= cfg.MIN_DISTANCE_HISTORY_FOR_SHRINKAGE:
+            historical = float(np.median(self.trip_miles[valid]))
+            weight = count / (count + float(cfg.DISTANCE_SHRINKAGE_KAPPA))
+            return weight * historical + (1.0 - weight) * road, count, 2
+        return road, count, 1
+
+    @staticmethod
+    def _hybrid_distance_mask(
+        miles: np.ndarray,
+        reference: float,
+        ratio_min: float,
+        ratio_max: float,
+        short_reference_max: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """返回联合距离判断及其中仅由绝对容差接受的记录。
+
+        第一项为“比例条件或超短绝对条件”的最终接受掩码；第二项只
+        标记比例条件失败、但超短绝对条件成功的记录，供5E和诊断计数。
+        """
+
+        miles = np.asarray(miles, dtype=np.float64)
+        reference = float(reference)
+        ratio = np.divide(
+            miles,
+            reference,
+            out=np.full(len(miles), np.nan, dtype=np.float64),
+            where=np.isfinite(reference) & (reference > 0.0),
+        )
+        relative = (
+            np.isfinite(ratio)
+            & (ratio >= float(ratio_min))
+            & (ratio <= float(ratio_max))
+        )
+        absolute = (
+            np.isfinite(reference)
+            & (reference > 0.0)
+            & (reference <= float(short_reference_max))
+            & np.isfinite(miles)
+            & (
+                np.abs(miles - reference)
+                <= float(cfg.SHORT_DISTANCE_ABSOLUTE_TOLERANCE_MILES)
+            )
+        )
+        return relative | absolute, absolute & ~relative
+
+    def _self_route_filter(
+        self,
+        candidates: np.ndarray,
+        target_ns: int,
+    ) -> tuple[np.ndarray, int, int]:
+        """删除自身行程里程与其 OD 距离基准不一致的订单。"""
+
+        candidates = np.asarray(candidates, dtype=np.int64)
+        if len(candidates) == 0:
+            return candidates, 0, 0
+        physical = self._valid_route_mask(candidates)
+        accepted = np.zeros(len(candidates), dtype=bool)
+        absolute_only = np.zeros(len(candidates), dtype=bool)
+        od_codes = (
+            self.i_index[candidates].astype(np.int64) * cfg.REGION_COUNT
+            + self.j_index[candidates].astype(np.int64)
+        )
+        for code in np.unique(
+            od_codes
+        ):
+            i = int(code // cfg.REGION_COUNT)
+            j = int(code % cfg.REGION_COUNT)
+            reference, _, _ = self._distance_reference(i, j, target_ns)
+            positions = od_codes == code
+            distance_ok, absolute_ok = self._hybrid_distance_mask(
+                self.trip_miles[candidates[positions]].astype(np.float64),
+                reference,
+                cfg.SELF_ROUTE_RATIO_MIN,
+                cfg.SELF_ROUTE_RATIO_MAX,
+                cfg.SHORT_CANDIDATE_REFERENCE_MAX_MILES,
+            )
+            accepted[positions] = physical[positions] & distance_ok
+            absolute_only[positions] = physical[positions] & absolute_ok
+        return (
+            candidates[accepted],
+            int((~accepted).sum()),
+            int(absolute_only.sum()),
+        )
 
     def _distance_similarity(
         self, candidates: np.ndarray, target_trip_miles: float
     ) -> np.ndarray:
         miles = self.trip_miles[candidates].astype(np.float64)
         log_ratio = np.abs(np.log(miles / float(target_trip_miles)))
-        return np.exp(-log_ratio / cfg.DISTANCE_SIMILARITY_LOG_SCALE)
+        relative = np.exp(-log_ratio / cfg.DISTANCE_SIMILARITY_LOG_SCALE)
+        if target_trip_miles <= cfg.SHORT_TARGET_REFERENCE_MAX_MILES:
+            absolute = np.exp(
+                -np.abs(miles - float(target_trip_miles))
+                / float(cfg.SHORT_DISTANCE_ABSOLUTE_TOLERANCE_MILES)
+            )
+            return np.maximum(relative, absolute)
+        return relative
 
-    def _distance_filter_4a(
-        self,
-        candidates: np.ndarray,
-        target_j: int,
-        target_trip_miles: float,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if len(candidates) == 0:
-            return candidates, np.empty(0, dtype=np.float64)
-        destinations = self.j_index[candidates]
-        miles = self.trip_miles[candidates].astype(np.float64)
-        ratio = miles / float(target_trip_miles)
-        mask = (
-            (destinations != target_j)
-            & self._valid_route_mask(candidates)
-            & (ratio >= cfg.TRIP_MILES_RATIO_MIN)
-            & (ratio <= cfg.TRIP_MILES_RATIO_MAX)
-        )
-        selected = candidates[mask]
-        return selected, self._distance_similarity(selected, target_trip_miles)
-
-    def _distance_filter_4b(
-        self,
-        candidates: np.ndarray,
-        target_j: int,
-        target_trip_miles: float,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if len(candidates) == 0:
-            return candidates, np.empty(0, dtype=np.float64)
-        destinations = self.j_index[candidates]
-        miles = self.trip_miles[candidates].astype(np.float64)
-        ratio = miles / float(target_trip_miles)
-        mask = (
-            self.neighbor_matrix[target_j, destinations]
-            & self._valid_route_mask(candidates)
-            & (ratio >= cfg.TRIP_MILES_RATIO_MIN)
-            & (ratio <= cfg.TRIP_MILES_RATIO_MAX)
-        )
-        selected = candidates[mask]
-        return selected, self._distance_similarity(selected, target_trip_miles)
-
-    def _neighbor_origin_candidates(
-        self,
-        origins: np.ndarray,
-        slot: int,
-        dow: int,
-        weekend_holiday: int,
-        target_ns: int,
-        relaxed: bool,
+    def _origin_date_type_time_prefix(
+        self, origin: int, date_type: int, slot: int, target_ns: int
     ) -> np.ndarray:
-        if relaxed:
-            parts = [
-                self._relaxed_origin_time_prefix(int(origin), slot, dow, target_ns)
-                for origin in origins
-            ]
+        key = (origin * cfg.DATE_TYPE_COUNT + date_type) * cfg.SLOTS_PER_DAY + slot
+        return self._prefix(
+            self.origin_dt_order, self.origin_dt_offsets, key, target_ns
+        )
+
+    def _global_date_type_time_prefix(
+        self, date_type: int, slot: int, target_ns: int
+    ) -> np.ndarray:
+        key = date_type * cfg.SLOTS_PER_DAY + slot
+        return self._prefix(self.global_dt_order, self.global_dt_offsets, key, target_ns)
+
+    def _time_window_candidates(
+        self,
+        origins: np.ndarray | None,
+        date_type: int,
+        target_slot: int,
+        target_ns: int,
+        *,
+        window_slots: int | None = None,
+        circular: bool = False,
+        cap_raw: bool = True,
+    ) -> np.ndarray:
+        if window_slots is None:
+            window_slots = cfg.LAYER4_TIME_NEIGHBOR_SLOTS
+        if circular:
+            # 第5层匹配的是不同历史日期的日内时间位置。此时23:45与
+            # 00:00应视为相邻；completion_time<t 仍负责阻止未来泄露。
+            slots = sorted(
+                {
+                    (int(target_slot) + offset) % cfg.SLOTS_PER_DAY
+                    for offset in range(-int(window_slots), int(window_slots) + 1)
+                }
+            )
         else:
-            parts = [
-                self._strict_origin_time_prefix(
-                    int(origin), slot, dow, weekend_holiday, target_ns
-                )
-                for origin in origins
-            ]
+            # 第4层保留原口径，不把同一天23:xx与00:xx直接循环相连。
+            low = max(0, target_slot - int(window_slots))
+            high = min(cfg.SLOTS_PER_DAY - 1, target_slot + int(window_slots))
+            slots = range(low, high + 1)
+        parts: list[np.ndarray] = []
+        if origins is None:
+            for slot in slots:
+                part = self._global_date_type_time_prefix(date_type, slot, target_ns)
+                if len(part):
+                    parts.append(part)
+        else:
+            for origin in origins:
+                for slot in slots:
+                    part = self._origin_date_type_time_prefix(
+                        int(origin), date_type, slot, target_ns
+                    )
+                    if len(part):
+                        parts.append(part)
+        if not parts:
+            return np.empty(0, dtype=np.int32)
+        candidates = np.concatenate(parts)
+        if cap_raw and len(candidates) > cfg.MAX_RAW_CANDIDATES_PER_SUBLAYER:
+            order = np.argsort(self.completion_ns[candidates], kind="stable")
+            candidates = candidates[order[-cfg.MAX_RAW_CANDIDATES_PER_SUBLAYER :]]
+        return candidates
+
+    def _all_date_type_time_candidates(
+        self,
+        target_slot: int,
+        target_ns: int,
+        window_slots: int,
+    ) -> np.ndarray:
+        """返回全部日期类型的循环日内时间候选，并去除重复订单。"""
+
+        parts = [
+            self._time_window_candidates(
+                None,
+                date_type,
+                target_slot,
+                target_ns,
+                window_slots=window_slots,
+                circular=True,
+                cap_raw=False,
+            )
+            for date_type in range(cfg.DATE_TYPE_COUNT)
+        ]
         parts = [part for part in parts if len(part)]
-        return np.concatenate(parts) if parts else np.empty(0, dtype=np.int32)
+        if not parts:
+            return np.empty(0, dtype=np.int32)
+        candidates = np.unique(np.concatenate(parts))
+        return candidates
+
+    def _filter_similar_layer(
+        self,
+        candidates: np.ndarray,
+        target_i: int,
+        target_j: int,
+        target_ns: int,
+        target_trip_miles: float,
+        sublevel: str,
+        *,
+        ratio_min: float | None = None,
+        ratio_max: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int, int, int]:
+        """执行相似OD层的空间口径、自身路线和目标距离检查。"""
+
+        candidates = np.asarray(candidates, dtype=np.int64)
+        if len(candidates) == 0:
+            return (
+                candidates, np.empty(0, dtype=np.float64),
+                np.empty(0, dtype=bool), 0, 0, 0, 0,
+            )
+        origins = self.i_index[candidates]
+        destinations = self.j_index[candidates]
+        same_target_od = (origins == target_i) & (destinations == target_j)
+        target_is_internal = target_i == target_j
+        same_route_type = (origins == destinations) == target_is_internal
+        if sublevel == "4A":
+            spatial = (
+                (origins == target_i)
+                & (destinations != target_j)
+                & same_route_type
+            )
+        elif sublevel == "4B":
+            spatial = (
+                self.neighbor_matrix[target_i, origins]
+                & self.neighbor_matrix[target_j, destinations]
+                & same_route_type
+            )
+        elif sublevel in {"4C", "5A", "5B", "5C", "5D"}:
+            spatial = same_route_type
+        else:
+            raise ValueError(f"未知第4层子层级：{sublevel}")
+        candidates = candidates[spatial & ~same_target_od]
+        self_checked, self_rejected, self_absolute = self._self_route_filter(
+            candidates, target_ns
+        )
+        if len(self_checked) == 0:
+            return (
+                self_checked, np.empty(0, dtype=np.float64),
+                np.empty(0, dtype=bool), self_rejected, 0, self_absolute, 0,
+            )
+        if ratio_min is None:
+            ratio_min = cfg.TRIP_MILES_RATIO_MIN
+        if ratio_max is None:
+            ratio_max = cfg.TRIP_MILES_RATIO_MAX
+        target_mask, target_absolute_only = self._hybrid_distance_mask(
+            self.trip_miles[self_checked].astype(np.float64),
+            target_trip_miles,
+            float(ratio_min),
+            float(ratio_max),
+            cfg.SHORT_TARGET_REFERENCE_MAX_MILES,
+        )
+        target_rejected = int((~target_mask).sum())
+        selected = self_checked[target_mask]
+        selected_absolute_only = target_absolute_only[target_mask]
+        similarity = self._distance_similarity(selected, target_trip_miles)
+        if sublevel in cfg.LAYER4_SUBLEVEL_RELIABILITY:
+            similarity *= float(cfg.LAYER4_SUBLEVEL_RELIABILITY[sublevel])
+        return (
+            selected,
+            similarity,
+            selected_absolute_only,
+            self_rejected,
+            target_rejected,
+            self_absolute,
+            int(selected_absolute_only.sum()),
+        )
 
     def select(
         self,
@@ -353,16 +605,27 @@ class RollingSampleCollector:
         target_dow: int,
         target_is_holiday: bool,
         target_weekend_holiday: int,
+        target_date_type: int,
     ) -> CandidateSet:
         selected = CandidateSet.empty()
         same_od = self._od_prefix(target_i, target_j, target_ns)
+        target_trip_miles, target_distance_count, target_distance_source = (
+            self._distance_reference(target_i, target_j, target_ns)
+        )
+        selected.target_reference_trip_miles = target_trip_miles
+        selected.target_distance_sample_count = target_distance_count
+        selected.target_distance_reference_source = target_distance_source
 
         strict_mask = (
             (self.slot[same_od] == target_slot)
             & (self.dow[same_od] == target_dow)
             & (self.weekend_holiday[same_od] == target_weekend_holiday)
         )
-        layer1 = same_od[strict_mask]
+        layer1, rejected, absolute_accepted = self._self_route_filter(
+            same_od[strict_mask], target_ns
+        )
+        selected.self_route_rejected_count += rejected
+        selected.self_short_absolute_accepted_count += absolute_accepted
         if (
             len(layer1) == 0
             and target_is_holiday
@@ -372,13 +635,21 @@ class RollingSampleCollector:
                 (self.slot[same_od] == target_slot)
                 & (self.dow[same_od] == target_dow)
             )
-            layer1 = same_od[relaxed_mask]
+            layer1, rejected, absolute_accepted = self._self_route_filter(
+                same_od[relaxed_mask], target_ns
+            )
+            selected.self_route_rejected_count += rejected
+            selected.self_short_absolute_accepted_count += absolute_accepted
             selected.holiday_relaxed = len(layer1) > 0
         selected.add(layer1, 1, self.completion_ns, "1")
         if selected.enough:
             return selected
 
-        layer2 = same_od[self.slot[same_od] == target_slot]
+        layer2, rejected, absolute_accepted = self._self_route_filter(
+            same_od[self.slot[same_od] == target_slot], target_ns
+        )
+        selected.self_route_rejected_count += rejected
+        selected.self_short_absolute_accepted_count += absolute_accepted
         selected.add(layer2, 2, self.completion_ns, "2")
         if selected.enough:
             return selected
@@ -423,42 +694,70 @@ class RollingSampleCollector:
             layer3 = same_od[previous_hour | lagged_window]
         else:
             layer3 = same_od
+        layer3, rejected, absolute_accepted = self._self_route_filter(
+            layer3, target_ns
+        )
+        selected.self_route_rejected_count += rejected
+        selected.self_short_absolute_accepted_count += absolute_accepted
         selected.add(layer3, 3, self.completion_ns, "3")
         if selected.enough:
             return selected
 
-        target_trip_miles, target_distance_count = (
-            self._target_reference_trip_miles(same_od)
-        )
-        selected.target_reference_trip_miles = target_trip_miles
-        selected.target_distance_sample_count = target_distance_count
         if not np.isfinite(target_trip_miles):
-            # 实际里程参考不可靠时不强行使用质心距离回退。
-            # 已收集的第 1—3 层仍然保留。
             selected.distance_reference_unavailable = True
             return selected
 
-        strict_4a = self._strict_origin_time_prefix(
-            target_i,
+        layer4a_raw = self._time_window_candidates(
+            np.asarray([target_i], dtype=np.int16),
+            target_date_type,
             target_slot,
-            target_dow,
-            target_weekend_holiday,
             target_ns,
         )
-        layer4a, similarity4a = self._distance_filter_4a(
-            strict_4a, target_j, target_trip_miles
+        (
+            layer4a, similarity4a, absolute4a, self_rejected,
+            target_rejected, self_absolute, target_absolute,
+        ) = (
+            self._filter_similar_layer(
+                layer4a_raw,
+                target_i,
+                target_j,
+                target_ns,
+                target_trip_miles,
+                "4A",
+            )
         )
+        selected.self_route_rejected_count += self_rejected
+        selected.target_distance_rejected_count += target_rejected
+        selected.self_short_absolute_accepted_count += self_absolute
+        selected.target_short_absolute_accepted_count += target_absolute
         if (
             len(layer4a) == 0
             and target_is_holiday
             and cfg.ALLOW_HOLIDAY_RELAXATION
         ):
-            relaxed_4a = self._relaxed_origin_time_prefix(
-                target_i, target_slot, target_dow, target_ns
+            relaxed_4a = self._time_window_candidates(
+                np.asarray([target_i], dtype=np.int16),
+                cfg.DATE_TYPE_WEEKDAY,
+                target_slot,
+                target_ns,
             )
-            layer4a, similarity4a = self._distance_filter_4a(
-                relaxed_4a, target_j, target_trip_miles
+            (
+                layer4a, similarity4a, absolute4a, self_rejected,
+                target_rejected, self_absolute, target_absolute,
+            ) = (
+                self._filter_similar_layer(
+                    relaxed_4a,
+                    target_i,
+                    target_j,
+                    target_ns,
+                    target_trip_miles,
+                    "4A",
+                )
             )
+            selected.self_route_rejected_count += self_rejected
+            selected.target_distance_rejected_count += target_rejected
+            selected.self_short_absolute_accepted_count += self_absolute
+            selected.target_short_absolute_accepted_count += target_absolute
             selected.holiday_relaxed |= len(layer4a) > 0
         selected.add(
             layer4a, 4, self.completion_ns, "4A", similarities=similarity4a
@@ -469,36 +768,271 @@ class RollingSampleCollector:
         origin_neighbors = self.neighbors.get(
             target_i, np.empty(0, dtype=np.int16)
         )
-        strict_4b = self._neighbor_origin_candidates(
+        strict_4b = self._time_window_candidates(
             origin_neighbors,
+            target_date_type,
             target_slot,
-            target_dow,
-            target_weekend_holiday,
             target_ns,
-            relaxed=False,
         )
-        layer4b, similarity4b = self._distance_filter_4b(
-            strict_4b, target_j, target_trip_miles
+        (
+            layer4b, similarity4b, absolute4b, self_rejected,
+            target_rejected, self_absolute, target_absolute,
+        ) = (
+            self._filter_similar_layer(
+                strict_4b,
+                target_i,
+                target_j,
+                target_ns,
+                target_trip_miles,
+                "4B",
+            )
         )
+        selected.self_route_rejected_count += self_rejected
+        selected.target_distance_rejected_count += target_rejected
+        selected.self_short_absolute_accepted_count += self_absolute
+        selected.target_short_absolute_accepted_count += target_absolute
         if (
             len(layer4b) == 0
             and target_is_holiday
             and cfg.ALLOW_HOLIDAY_RELAXATION
         ):
-            relaxed_4b = self._neighbor_origin_candidates(
+            relaxed_4b = self._time_window_candidates(
                 origin_neighbors,
+                cfg.DATE_TYPE_WEEKDAY,
                 target_slot,
-                target_dow,
-                target_weekend_holiday,
                 target_ns,
-                relaxed=True,
             )
-            layer4b, similarity4b = self._distance_filter_4b(
-                relaxed_4b, target_j, target_trip_miles
+            (
+                layer4b, similarity4b, absolute4b, self_rejected,
+                target_rejected, self_absolute, target_absolute,
+            ) = (
+                self._filter_similar_layer(
+                    relaxed_4b,
+                    target_i,
+                    target_j,
+                    target_ns,
+                    target_trip_miles,
+                    "4B",
+                )
             )
+            selected.self_route_rejected_count += self_rejected
+            selected.target_distance_rejected_count += target_rejected
+            selected.self_short_absolute_accepted_count += self_absolute
+            selected.target_short_absolute_accepted_count += target_absolute
             selected.holiday_relaxed |= len(layer4b) > 0
         selected.add(
             layer4b, 4, self.completion_ns, "4B", similarities=similarity4b
+        )
+        if selected.enough:
+            return selected
+
+        # 4C 冷启动回退：相同日期类型、前后4个15分钟时段、同为区内
+        # 或区间行程；不要求起终点相邻，但仍同时通过候选自身路线检查
+        # 和目标距离相似检查，因此不会仅凭价格接近而纳入样本。
+        raw_4c = self._time_window_candidates(
+            None, target_date_type, target_slot, target_ns
+        )
+        (
+            layer4c, similarity4c, absolute4c, self_rejected,
+            target_rejected, self_absolute, target_absolute,
+        ) = (
+            self._filter_similar_layer(
+                raw_4c,
+                target_i,
+                target_j,
+                target_ns,
+                target_trip_miles,
+                "4C",
+            )
+        )
+        selected.self_route_rejected_count += self_rejected
+        selected.target_distance_rejected_count += target_rejected
+        selected.self_short_absolute_accepted_count += self_absolute
+        selected.target_short_absolute_accepted_count += target_absolute
+        if (
+            len(layer4c) == 0
+            and target_is_holiday
+            and cfg.ALLOW_HOLIDAY_RELAXATION
+        ):
+            raw_4c = self._time_window_candidates(
+                None, cfg.DATE_TYPE_WEEKDAY, target_slot, target_ns
+            )
+            (
+                layer4c, similarity4c, absolute4c, self_rejected,
+                target_rejected, self_absolute, target_absolute,
+            ) = (
+                self._filter_similar_layer(
+                    raw_4c,
+                    target_i,
+                    target_j,
+                    target_ns,
+                    target_trip_miles,
+                    "4C",
+                )
+            )
+            selected.self_route_rejected_count += self_rejected
+            selected.target_distance_rejected_count += target_rejected
+            selected.self_short_absolute_accepted_count += self_absolute
+            selected.target_short_absolute_accepted_count += target_absolute
+            selected.holiday_relaxed |= len(layer4c) > 0
+        selected.add(
+            layer4c, 4, self.completion_ns, "4C", similarities=similarity4c
+        )
+
+        # 第5层只服务于原本不可用的目标：没有任何同OD样本，且经过
+        # 4A/4B/4C 后相似OD仍少于10笔。已经可用的目标在这里直接返回，
+        # 因而第5层不会改变其样本或分布。
+        same_count = sum(level <= 3 for level in selected.levels)
+        similar_count = sum(level >= 4 for level in selected.levels)
+        if same_count > 0 or similar_count >= cfg.SIMILAR_ONLY_MIN_SAMPLES:
+            return selected
+
+        selected.fallback_attempted = True
+
+        def add_fallback(
+            raw: np.ndarray,
+            sublevel: str,
+            stage: int,
+            ratio_min: float = cfg.TRIP_MILES_RATIO_MIN,
+            ratio_max: float = cfg.TRIP_MILES_RATIO_MAX,
+        ) -> None:
+            # 第5层的全局时间候选可能很多。必须先按行程类型和目标
+            # 距离做廉价向量筛选，再保留最近的最多5000笔进入昂贵的
+            # “候选自身OD滚动距离”检查；不能像旧4C那样在距离筛选前
+            # 截断，否则稀有长距离/短距离目标可能永远检索不到候选。
+            raw = np.asarray(raw, dtype=np.int64)
+            if len(raw):
+                origins = self.i_index[raw]
+                destinations = self.j_index[raw]
+                same_target_od = (origins == target_i) & (destinations == target_j)
+                same_route_type = (
+                    (origins == destinations) == (target_i == target_j)
+                )
+                distance_ok, _ = self._hybrid_distance_mask(
+                    self.trip_miles[raw].astype(np.float64),
+                    target_trip_miles,
+                    float(ratio_min),
+                    float(ratio_max),
+                    cfg.SHORT_TARGET_REFERENCE_MAX_MILES,
+                )
+                preliminary = (
+                    ~same_target_od
+                    & same_route_type
+                    & distance_ok
+                )
+                raw = raw[preliminary]
+                if len(raw) > cfg.MAX_RAW_CANDIDATES_PER_SUBLAYER:
+                    order = np.argsort(self.completion_ns[raw], kind="stable")
+                    raw = raw[order[-cfg.MAX_RAW_CANDIDATES_PER_SUBLAYER :]]
+            (
+                fallback, similarity, absolute_only, self_rejected,
+                target_rejected, self_absolute, target_absolute,
+            ) = (
+                self._filter_similar_layer(
+                    raw,
+                    target_i,
+                    target_j,
+                    target_ns,
+                    target_trip_miles,
+                    sublevel,
+                    ratio_min=ratio_min,
+                    ratio_max=ratio_max,
+                )
+            )
+            selected.self_route_rejected_count += self_rejected
+            selected.target_distance_rejected_count += target_rejected
+            selected.self_short_absolute_accepted_count += self_absolute
+            selected.target_short_absolute_accepted_count += target_absolute
+            if len(fallback):
+                slot_gap = np.abs(
+                    self.slot[fallback].astype(np.int16) - int(target_slot)
+                )
+                slot_gap = np.minimum(slot_gap, cfg.SLOTS_PER_DAY - slot_gap)
+                distance_gap = np.abs(
+                    np.log(
+                        self.trip_miles[fallback].astype(np.float64)
+                        / float(target_trip_miles)
+                    )
+                )
+                date_type_mismatch = (
+                    self.date_type[fallback].astype(np.int16)
+                    != int(target_date_type)
+                ).astype(np.int8)
+                # np.lexsort最后一个键优先：日期类型、时段差、距离差、
+                # 完成时间（越新越优先）。
+                order = np.lexsort(
+                    (
+                        -self.completion_ns[fallback],
+                        distance_gap,
+                        slot_gap,
+                        date_type_mismatch,
+                    )
+                )
+                fallback = fallback[order]
+                similarity = similarity[order]
+                absolute_only = absolute_only[order]
+            before = len(selected.indices)
+            # 5E表示在5A—5D当前检索范围内，仅由超短绝对容差接受的
+            # 订单；它与各层并行判断，不是在5D失败后才补跑。
+            output_sublevels = np.where(absolute_only, "5E", sublevel)
+            selected.add(
+                fallback,
+                5,
+                self.completion_ns,
+                output_sublevels,
+                similarities=similarity,
+                preserve_order=True,
+            )
+            if len(selected.indices) > before:
+                selected.fallback_final_level = stage
+
+        def fallback_is_sufficient() -> bool:
+            return len(selected.indices) >= cfg.SIMILAR_ONLY_MIN_SAMPLES
+
+        # 5A：相同日期类型，前后2小时。普通距离使用[0.8,1.25]；
+        # 超短目标同时执行绝对容差分支，命中的订单标为5E。
+        raw_5a = self._time_window_candidates(
+            None,
+            target_date_type,
+            target_slot,
+            target_ns,
+            window_slots=cfg.LAYER5_TIME_NEIGHBOR_SLOTS_SHORT,
+            circular=True,
+            cap_raw=False,
+        )
+        add_fallback(raw_5a, "5A", 1)
+        if fallback_is_sufficient():
+            return selected
+
+        # 5B：全部日期类型，仍为前后2小时和严格比例/超短联合距离。
+        raw_5b = self._all_date_type_time_candidates(
+            target_slot,
+            target_ns,
+            cfg.LAYER5_TIME_NEIGHBOR_SLOTS_SHORT,
+        )
+        add_fallback(raw_5b, "5B", 2)
+        if fallback_is_sufficient():
+            return selected
+
+        # 5C：全部日期类型，时间扩大到前后4小时，比例范围仍不放宽。
+        raw_5c = self._all_date_type_time_candidates(
+            target_slot,
+            target_ns,
+            cfg.LAYER5_TIME_NEIGHBOR_SLOTS_LONG,
+        )
+        add_fallback(raw_5c, "5C", 3)
+        if fallback_is_sufficient():
+            return selected
+
+        # 5D：最后才把普通距离从[0.8,1.25]小幅放宽至[0.75,1.33]。
+        # 超短绝对分支仍与5D并行，且仍标记为5E。
+        # raw_5c 已经覆盖同一时间和日期候选，可以直接复用。
+        add_fallback(
+            raw_5c,
+            "5D",
+            4,
+            ratio_min=cfg.LAYER5_DISTANCE_RATIO_MIN,
+            ratio_max=cfg.LAYER5_DISTANCE_RATIO_MAX,
         )
         return selected
 
@@ -516,6 +1050,7 @@ class RollingSampleCollector:
             target_dow,
             target_is_holiday,
             target_weekend_holiday,
+            target_date_type,
             demand,
         ) = record
         base = {
@@ -534,6 +1069,7 @@ class RollingSampleCollector:
             int(target_dow),
             bool(target_is_holiday),
             int(target_weekend_holiday),
+            int(target_date_type),
         )
         if not candidates.indices:
             return {
@@ -564,14 +1100,36 @@ class RollingSampleCollector:
                 "layer4_count": 0,
                 "layer4a_count": 0,
                 "layer4b_count": 0,
+                "layer4c_count": 0,
+                "layer5a_count": 0,
+                "layer5b_count": 0,
+                "layer5c_count": 0,
+                "layer5d_count": 0,
+                "layer5e_count": 0,
                 "target_reference_trip_miles": float(
                     candidates.target_reference_trip_miles
                 ),
                 "target_distance_sample_count": int(
                     candidates.target_distance_sample_count
                 ),
+                "target_distance_reference_source": int(
+                    candidates.target_distance_reference_source
+                ),
+                "self_route_rejected_count": int(
+                    candidates.self_route_rejected_count
+                ),
+                "target_distance_rejected_count": int(
+                    candidates.target_distance_rejected_count
+                ),
+                "self_short_absolute_accepted_count": int(
+                    candidates.self_short_absolute_accepted_count
+                ),
+                "target_short_absolute_accepted_count": int(
+                    candidates.target_short_absolute_accepted_count
+                ),
                 "sample_prices": [],
                 "sample_levels": [],
+                "sample_sublevels": [],
                 "sample_trip_miles": [],
                 "sample_similarity_weights": [],
             }
@@ -583,11 +1141,12 @@ class RollingSampleCollector:
         sample_trip_miles = self.trip_miles[indices].astype(np.float64)
         weight_lookup = np.asarray(
             [0.0, cfg.LAYER_WEIGHTS[1], cfg.LAYER_WEIGHTS[2],
-             cfg.LAYER_WEIGHTS[3], cfg.LAYER_WEIGHTS[4]],
+             cfg.LAYER_WEIGHTS[3], cfg.LAYER_WEIGHTS[4],
+             cfg.LAYER_WEIGHTS[5]],
             dtype=np.float64,
         )
         same_od_mask = levels <= 3
-        similar_od_mask = levels == 4
+        similar_od_mask = levels >= 4
         same_od_count = int(same_od_mask.sum())
         similar_od_count = int(similar_od_mask.sum())
 
@@ -670,17 +1229,41 @@ class RollingSampleCollector:
             "layer1_count": int(np.sum(levels == 1)),
             "layer2_count": int(np.sum(levels == 2)),
             "layer3_count": int(np.sum(levels == 3)),
-            "layer4_count": int(np.sum(levels == 4)),
+            # 为保持既有Parquet结构兼容，layer4_count继续表示整个
+            # “相似OD成分”的样本总数，其中包含4A—4C和5A—5E。
+            "layer4_count": int(np.sum(levels >= 4)),
             "layer4a_count": int(np.sum(sublevels == "4A")),
             "layer4b_count": int(np.sum(sublevels == "4B")),
+            "layer4c_count": int(np.sum(sublevels == "4C")),
+            "layer5a_count": int(np.sum(sublevels == "5A")),
+            "layer5b_count": int(np.sum(sublevels == "5B")),
+            "layer5c_count": int(np.sum(sublevels == "5C")),
+            "layer5d_count": int(np.sum(sublevels == "5D")),
+            "layer5e_count": int(np.sum(sublevels == "5E")),
             "target_reference_trip_miles": float(
                 candidates.target_reference_trip_miles
             ),
             "target_distance_sample_count": int(
                 candidates.target_distance_sample_count
             ),
+            "target_distance_reference_source": int(
+                candidates.target_distance_reference_source
+            ),
+            "self_route_rejected_count": int(
+                candidates.self_route_rejected_count
+            ),
+            "target_distance_rejected_count": int(
+                candidates.target_distance_rejected_count
+            ),
+            "self_short_absolute_accepted_count": int(
+                candidates.self_short_absolute_accepted_count
+            ),
+            "target_short_absolute_accepted_count": int(
+                candidates.target_short_absolute_accepted_count
+            ),
             "sample_prices": prices.astype(np.float32).tolist(),
             "sample_levels": levels.tolist(),
+            "sample_sublevels": sublevels.tolist(),
             "sample_trip_miles": sample_trip_miles.astype(np.float32).tolist(),
             "sample_similarity_weights": similarities.astype(np.float32).tolist(),
         }
@@ -711,10 +1294,15 @@ def records_from_batch(batch: pa.RecordBatch) -> list[tuple]:
     return list(zip(*(columns[name] for name in names)))
 
 
-def write_sample_part(results: list[dict[str, object]], part_number: int) -> Path:
+def sample_results_to_table(results: list[dict[str, object]]) -> pa.Table:
+    """把收集结果转换成稳定的Parquet表结构，供全量和定向流程复用。"""
+
     data = pd.DataFrame(results)
     prices = pa.array(data.pop("sample_prices").tolist(), type=pa.list_(pa.float32()))
     levels = pa.array(data.pop("sample_levels").tolist(), type=pa.list_(pa.int8()))
+    sublevels = pa.array(
+        data.pop("sample_sublevels").tolist(), type=pa.list_(pa.string())
+    )
     trip_miles = pa.array(
         data.pop("sample_trip_miles").tolist(), type=pa.list_(pa.float32())
     )
@@ -727,7 +1315,13 @@ def write_sample_part(results: list[dict[str, object]], part_number: int) -> Pat
         "unreliable_similar_only_flag", "sample_count", "same_od_sample_count",
         "similar_od_sample_count", "max_match_level",
         "layer1_count", "layer2_count", "layer3_count", "layer4_count",
-        "layer4a_count", "layer4b_count", "target_distance_sample_count",
+        "layer4a_count", "layer4b_count", "layer4c_count",
+        "layer5a_count", "layer5b_count", "layer5c_count", "layer5d_count",
+        "layer5e_count",
+        "target_distance_sample_count", "target_distance_reference_source",
+        "self_route_rejected_count", "target_distance_rejected_count",
+        "self_short_absolute_accepted_count",
+        "target_short_absolute_accepted_count",
     ]
     for column in int_columns:
         data[column] = data[column].astype("int16")
@@ -743,8 +1337,14 @@ def write_sample_part(results: list[dict[str, object]], part_number: int) -> Pat
     table = pa.Table.from_pandas(data, preserve_index=False)
     table = table.append_column("sample_prices", prices)
     table = table.append_column("sample_levels", levels)
+    table = table.append_column("sample_sublevels", sublevels)
     table = table.append_column("sample_trip_miles", trip_miles)
     table = table.append_column("sample_similarity_weights", similarity_weights)
+    return table
+
+
+def write_sample_part(results: list[dict[str, object]], part_number: int) -> Path:
+    table = sample_results_to_table(results)
     output = cfg.SAMPLE_DATASET / f"part-{part_number:05d}.parquet"
     pq.write_table(table, output, compression=cfg.PARQUET_COMPRESSION)
     return output
@@ -766,12 +1366,18 @@ def validate_inputs() -> None:
         cfg.HISTORY_COMPLETION_NS_FILE, cfg.HISTORY_I_FILE, cfg.HISTORY_J_FILE,
         cfg.HISTORY_DAY_FILE, cfg.HISTORY_SLOT_FILE, cfg.HISTORY_DOW_FILE,
         cfg.HISTORY_WEEKEND_HOLIDAY_FILE, cfg.HISTORY_PRICE_FILE,
+        cfg.HISTORY_DATE_TYPE_FILE,
         cfg.HISTORY_TRIP_MILES_FILE, cfg.HISTORY_TRIP_SECONDS_FILE,
         cfg.OD_ORDER_FILE, cfg.OD_OFFSETS_FILE,
         cfg.ORIGIN_TIME_STRICT_ORDER_FILE, cfg.ORIGIN_TIME_STRICT_OFFSETS_FILE,
         cfg.ORIGIN_TIME_RELAXED_ORDER_FILE, cfg.ORIGIN_TIME_RELAXED_OFFSETS_FILE,
+        cfg.ORIGIN_DATE_TYPE_TIME_ORDER_FILE,
+        cfg.ORIGIN_DATE_TYPE_TIME_OFFSETS_FILE,
+        cfg.GLOBAL_DATE_TYPE_TIME_ORDER_FILE,
+        cfg.GLOBAL_DATE_TYPE_TIME_OFFSETS_FILE,
         cfg.NEIGHBOR_MATRIX_FILE,
         cfg.NORMALIZED_NEIGHBOR_FILE,
+        cfg.OD_ROAD_DISTANCE_FILE,
     ]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
@@ -805,7 +1411,7 @@ def main() -> None:
     required_columns = [
         "target_id", "i", "j", "i_index", "j_index", "t", "target_ns",
         "target_day", "target_slot", "target_dow", "target_is_holiday",
-        "target_weekend_or_holiday", "D_ijt_observed",
+        "target_weekend_or_holiday", "target_date_type", "D_ijt_observed",
     ]
 
     pool = None
@@ -817,6 +1423,8 @@ def main() -> None:
         "skipped_existing_batches": 0,
         "available_rows_this_run": 0,
         "insufficient_rows_this_run": 0,
+        "layer5e_samples_this_run": 0,
+        "target_short_absolute_rows_this_run": 0,
     }
     try:
         for batch_number, batch in enumerate(
@@ -851,6 +1459,13 @@ def main() -> None:
             counters["insufficient_rows_this_run"] += sum(
                 int(row["insufficient_sample_flag"]) for row in results
             )
+            counters["layer5e_samples_this_run"] += sum(
+                int(row["layer5e_count"]) for row in results
+            )
+            counters["target_short_absolute_rows_this_run"] += sum(
+                int(row["target_short_absolute_accepted_count"] > 0)
+                for row in results
+            )
             print(
                 f"batch {batch_number}: 写出 {len(results):,} 行；"
                 f"本次累计 {counters['processed_rows_this_run']:,} 行"
@@ -866,7 +1481,21 @@ def main() -> None:
         "sample_dataset": str(cfg.SAMPLE_DATASET),
         "n_min": int(cfg.N_MIN),
         "n_max": int(cfg.N_MAX),
-        "kde_components": "same_od_layers_1_2_3 + similar_od_layer_4",
+        "kde_components": (
+            "same_od_layers_1_2_3 + similar_od_layers_4A_4B_4C_5A_5B_5C_5D_5E"
+        ),
+        "short_distance_rule": {
+            "candidate_reference_max_miles": float(
+                cfg.SHORT_CANDIDATE_REFERENCE_MAX_MILES
+            ),
+            "target_reference_max_miles": float(
+                cfg.SHORT_TARGET_REFERENCE_MAX_MILES
+            ),
+            "absolute_tolerance_miles": float(
+                cfg.SHORT_DISTANCE_ABSOLUTE_TOLERANCE_MILES
+            ),
+            "layer5e_meaning": "absolute-only branch evaluated within 5A-5D",
+        },
         "mixture_method": {
             "basis": "effective_sample_size_and_trip_distance_similarity",
             "similar_reliability_discount": float(

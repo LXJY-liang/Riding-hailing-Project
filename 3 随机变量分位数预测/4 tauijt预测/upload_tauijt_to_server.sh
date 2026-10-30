@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SSH_HOST="${SSH_HOST:-root@connect.nmb1.seetacloud.com}"
-SSH_PORT="${SSH_PORT:-36453}"
+SSH_PORT="${SSH_PORT:-33991}"
 REMOTE_PROJECT="${REMOTE_PROJECT:-/root/autodl-tmp/Riding hailing_Project}"
 UPLOAD_BASE_MODEL="${UPLOAD_BASE_MODEL:-auto}"
 SSH_CONTROL_PATH="/tmp/tauijt-upload-%C"
@@ -40,6 +40,8 @@ sources=(
   "./3 随机变量分位数预测/4 tauijt预测/output/tokenized/tauijt_valid_tokenized/"
   "./3 随机变量分位数预测/4 tauijt预测/output/model/tokenizer/"
   "./3 随机变量分位数预测/4 tauijt预测/output/model/label_scaler.json"
+  "./3 随机变量分位数预测/4 tauijt预测/output/data/tauijt_data_manifest.json"
+  "./3 随机变量分位数预测/4 tauijt预测/output/tokenized/tauijt_tokenization_manifest.json"
 )
 
 if [ "$UPLOAD_BASE_MODEL" = "1" ]; then
@@ -47,7 +49,7 @@ if [ "$UPLOAD_BASE_MODEL" = "1" ]; then
 fi
 
 escaped_remote_project="${REMOTE_PROJECT// /\\ }"
-rsync -avhR --partial --progress \
+rsync -avhzR --partial --progress \
   -e "ssh -p $SSH_PORT -o ControlMaster=auto -o ControlPersist=600 -o ControlPath=$SSH_CONTROL_PATH" \
   "${sources[@]}" \
   "$SSH_HOST:$escaped_remote_project/"

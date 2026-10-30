@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-"""随机抽取 p^e_ijt 目标，重建四层价格样本并核对 KDE 结果。
+"""随机抽取 p^e_ijt 目标，重建分层价格样本并核对 KDE 结果。
 
 默认从 available_flag=1 的完整结果中等概率抽取 3 个目标。对每个目标：
 
-1. 使用第 5 步的同一收集器重新执行四层匹配；
-2. 导出实际进入 KDE 的每笔历史价格、层级、4A/4B、权重和时间；
+1. 使用第 5 步的同一收集器重新执行1、2、3、4A、4B、4C匹配；
+2. 导出实际进入 KDE 的每笔历史价格、层级、4A/4B/4C、权重和时间；
 3. 与第 5 步保存的 sample_prices/sample_levels/带宽逐项比较；
 4. 分别重建相同 OD KDE 与相似实际里程 OD KDE，按有效样本量
    和里程相似度混合 CDF；
-5. 使用第 6 步同一函数重新计算 101 维分位数；
+5. 使用第 5 步实际落盘的 float32 样本和第 6 步同一函数，重新计算
+   101 维分位数；原始历史重建结果继续用于核对候选样本和中间参数；
 6. 与最终 peijt_quantiles 中的 101 维结果逐项比较。
 
 注意：算法达到 N_min=50 后会停止进入更低层级。因此某些随机目标没有
@@ -74,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--require-level4",
         action="store_true",
-        help="只从实际进入第 4 层的目标中抽样，便于重点检查相似 OD 回退。",
+        help="只从实际进入第4或第5层的目标中抽样，重点检查相似OD回退。",
     )
     parser.add_argument(
         "--overwrite",
@@ -96,6 +97,7 @@ def validate_inputs() -> None:
         cfg.HISTORY_SLOT_FILE,
         cfg.HISTORY_DOW_FILE,
         cfg.HISTORY_WEEKEND_HOLIDAY_FILE,
+        cfg.HISTORY_DATE_TYPE_FILE,
         cfg.HISTORY_PRICE_FILE,
         cfg.HISTORY_TRIP_MILES_FILE,
         cfg.HISTORY_TRIP_SECONDS_FILE,
@@ -105,8 +107,13 @@ def validate_inputs() -> None:
         cfg.ORIGIN_TIME_STRICT_OFFSETS_FILE,
         cfg.ORIGIN_TIME_RELAXED_ORDER_FILE,
         cfg.ORIGIN_TIME_RELAXED_OFFSETS_FILE,
+        cfg.ORIGIN_DATE_TYPE_TIME_ORDER_FILE,
+        cfg.ORIGIN_DATE_TYPE_TIME_OFFSETS_FILE,
+        cfg.GLOBAL_DATE_TYPE_TIME_ORDER_FILE,
+        cfg.GLOBAL_DATE_TYPE_TIME_OFFSETS_FILE,
         cfg.NEIGHBOR_MATRIX_FILE,
         cfg.NORMALIZED_NEIGHBOR_FILE,
+        cfg.OD_ROAD_DISTANCE_FILE,
     ]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
@@ -129,7 +136,7 @@ def random_target_ids(
         mask = available
         if require_level4:
             level = batch.column("max_match_level").to_numpy(zero_copy_only=False)
-            mask &= level == 4
+            mask &= level >= 4
         if mask.any():
             eligible_parts.append(target_id[mask].astype(np.int64, copy=False))
 
@@ -203,7 +210,7 @@ def main() -> None:
     data_start = pd.Timestamp(cfg.DATA_START).normalize()
     weight_lookup = np.asarray(
         [0.0, cfg.LAYER_WEIGHTS[1], cfg.LAYER_WEIGHTS[2],
-         cfg.LAYER_WEIGHTS[3], cfg.LAYER_WEIGHTS[4]],
+         cfg.LAYER_WEIGHTS[3], cfg.LAYER_WEIGHTS[4], cfg.LAYER_WEIGHTS[5]],
         dtype=np.float64,
     )
 
@@ -227,6 +234,7 @@ def main() -> None:
             int(target["target_dow"]),
             bool(target["target_is_holiday"]),
             int(target["target_weekend_or_holiday"]),
+            int(target["target_date_type"]),
         )
         indices = np.asarray(candidates.indices, dtype=np.int64)
         levels = np.asarray(candidates.levels, dtype=np.int8)
@@ -235,18 +243,20 @@ def main() -> None:
         prices = collector.price[indices].astype(np.float32)
         trip_miles = collector.trip_miles[indices].astype(np.float32)
         same_od_mask = levels <= 3
-        similar_od_mask = levels == 4
+        similar_od_mask = levels >= 4
         same_od_count = int(same_od_mask.sum())
         similar_od_count = int(similar_od_mask.sum())
 
         stored_prices = np.asarray(saved["sample_prices"], dtype=np.float32)
         stored_levels = np.asarray(saved["sample_levels"], dtype=np.int8)
+        stored_sublevels = np.asarray(saved["sample_sublevels"], dtype="U2")
         stored_miles = np.asarray(saved["sample_trip_miles"], dtype=np.float32)
         stored_similarities = np.asarray(
             saved["sample_similarity_weights"], dtype=np.float32
         )
         prices_equal = bool(np.array_equal(prices, stored_prices))
         levels_equal = bool(np.array_equal(levels, stored_levels))
+        sublevels_equal = bool(np.array_equal(sublevels, stored_sublevels))
         miles_equal = bool(np.allclose(trip_miles, stored_miles, equal_nan=True))
         similarities_equal = bool(
             np.allclose(similarities, stored_similarities, atol=1e-6, rtol=1e-6)
@@ -291,21 +301,21 @@ def main() -> None:
                     similar_od_count,
                 )
             )
-            rebuilt_quantiles = kde_module.kde_quantiles(
+            history_adaptive_result = kde_module.adaptive_kde_result(
                 (
-                    prices.tolist(),
-                    levels.tolist(),
-                    similarities.tolist(),
-                    same_od_bandwidth,
-                    similar_od_bandwidth,
-                    same_od_mixture_weight,
-                    1,
+                    prices.tolist(), levels.tolist(), similarities.tolist(),
+                    same_od_bandwidth, similar_od_bandwidth,
+                    same_od_mixture_weight, 1, trip_miles.tolist(),
+                    float(candidates.target_reference_trip_miles),
+                    same_od_effective_n, similar_od_effective_n,
+                    similar_mean_similarity, same_od_count, similar_od_count,
                 )
             )
+            history_rebuilt_quantiles = history_adaptive_result[0]
         else:
             same_od_mixture_weight = np.nan
             similar_od_mixture_weight = np.nan
-            rebuilt_quantiles = np.full(
+            history_rebuilt_quantiles = np.full(
                 len(cfg.QUANTILE_COLUMNS), np.nan, dtype=np.float32
             )
 
@@ -362,6 +372,32 @@ def main() -> None:
                 equal_nan=True,
             )
         )
+
+        # 第 6 步读取的是第 5 步写入 Parquet 的 float32 样本。这里必须使用
+        # 相同的落盘精度复算 KDE；若直接使用历史重建阶段的 float64 相似度，
+        # 20 次二分求解可能产生不足 0.0001 美元的尾差并触发假失败。
+        stored_precision_result = kde_module.adaptive_kde_result(
+            (
+                stored_prices.tolist(),
+                stored_levels.tolist(),
+                stored_similarities.tolist(),
+                stored_same_od_bandwidth,
+                stored_similar_od_bandwidth,
+                float(saved["same_od_mixture_weight"]),
+                int(saved["available_flag"]),
+                stored_miles.tolist(),
+                float(saved["target_reference_trip_miles"]),
+                float(saved["same_od_effective_sample_size"]),
+                float(saved["similar_od_effective_sample_size"]),
+                float(saved["similar_od_mean_similarity"]),
+                int(saved["same_od_sample_count"]),
+                int(saved["similar_od_sample_count"]),
+            )
+        )
+        rebuilt_quantiles = stored_precision_result[0]
+        rebuilt_final_same_weight = float(stored_precision_result[1])
+        rebuilt_adaptive_flag = int(stored_precision_result[4])
+
         stored_quantiles = final[cfg.QUANTILE_COLUMNS].to_numpy(dtype=np.float32)
         finite = np.isfinite(stored_quantiles) & np.isfinite(rebuilt_quantiles)
         if finite.any():
@@ -371,6 +407,25 @@ def main() -> None:
         else:
             max_quantile_error = 0.0
             mean_quantile_error = 0.0
+
+        history_finite = (
+            np.isfinite(stored_quantiles)
+            & np.isfinite(history_rebuilt_quantiles)
+        )
+        if history_finite.any():
+            history_absolute_error = np.abs(
+                stored_quantiles - history_rebuilt_quantiles
+            )
+            history_max_quantile_error = float(
+                history_absolute_error[history_finite].max()
+            )
+            history_mean_quantile_error = float(
+                history_absolute_error[history_finite].mean()
+            )
+        else:
+            history_max_quantile_error = 0.0
+            history_mean_quantile_error = 0.0
+
         quantiles_equal = bool(
             np.allclose(
                 stored_quantiles,
@@ -380,11 +435,22 @@ def main() -> None:
                 equal_nan=True,
             )
         )
+        final_weight_equal = bool(
+            np.isclose(
+                rebuilt_final_same_weight,
+                float(final["same_od_mixture_weight"]),
+                atol=1e-6,
+                rtol=0.0,
+                equal_nan=True,
+            )
+            and rebuilt_adaptive_flag == int(final["adaptive_reweight_flag"])
+        )
 
         all_checks_passed = all(
             [
                 prices_equal,
                 levels_equal,
+                sublevels_equal,
                 miles_equal,
                 similarities_equal,
                 count_equal,
@@ -393,6 +459,7 @@ def main() -> None:
                 similar_od_bandwidth_equal,
                 effective_size_equal,
                 mixture_weight_equal,
+                final_weight_equal,
                 quantiles_equal,
             ]
         )
@@ -428,20 +495,33 @@ def main() -> None:
                 "similar_od_bandwidth_usd_rebuilt": float(similar_od_bandwidth),
                 "same_od_mixture_weight": float(same_od_mixture_weight),
                 "similar_od_mixture_weight": float(similar_od_mixture_weight),
+                "final_same_od_mixture_weight": float(
+                    rebuilt_final_same_weight
+                ),
+                "adaptive_reweight_flag": rebuilt_adaptive_flag,
                 "max_match_level": int(saved["max_match_level"]),
                 "layer1_count": int(np.sum(levels == 1)),
                 "layer2_count": int(np.sum(levels == 2)),
                 "layer3_count": int(np.sum(levels == 3)),
                 "layer4_count": int(np.sum(levels == 4)),
                 "layer4a_count": int(np.sum(sublevels == "4A")),
+                "layer5_count": int(np.sum(levels == 5)),
+                "layer5a_count": int(np.sum(sublevels == "5A")),
+                "layer5b_count": int(np.sum(sublevels == "5B")),
+                "layer5c_count": int(np.sum(sublevels == "5C")),
+                "layer5d_count": int(np.sum(sublevels == "5D")),
+                "layer5e_count": int(np.sum(sublevels == "5E")),
                 "layer4b_count": int(np.sum(sublevels == "4B")),
+                "layer4c_count": int(np.sum(sublevels == "4C")),
                 "layer1_prices": json_price_list(prices[levels == 1]),
                 "layer2_prices": json_price_list(prices[levels == 2]),
                 "layer3_prices": json_price_list(prices[levels == 3]),
                 "layer4a_prices": json_price_list(prices[sublevels == "4A"]),
                 "layer4b_prices": json_price_list(prices[sublevels == "4B"]),
+                "layer4c_prices": json_price_list(prices[sublevels == "4C"]),
                 "prices_equal_to_saved": int(prices_equal),
                 "levels_equal_to_saved": int(levels_equal),
+                "sublevels_equal_to_saved": int(sublevels_equal),
                 "trip_miles_equal_to_saved": int(miles_equal),
                 "similarities_equal_to_saved": int(similarities_equal),
                 "sample_count_equal": int(count_equal),
@@ -450,9 +530,16 @@ def main() -> None:
                 "similar_od_bandwidth_equal": int(similar_od_bandwidth_equal),
                 "effective_size_equal": int(effective_size_equal),
                 "mixture_weight_equal": int(mixture_weight_equal),
+                "adaptive_final_weight_equal": int(final_weight_equal),
                 "quantiles_equal": int(quantiles_equal),
                 "max_quantile_abs_error_usd": max_quantile_error,
                 "mean_quantile_abs_error_usd": mean_quantile_error,
+                "history_rebuild_max_quantile_abs_error_usd": (
+                    history_max_quantile_error
+                ),
+                "history_rebuild_mean_quantile_abs_error_usd": (
+                    history_mean_quantile_error
+                ),
                 "all_checks_passed": int(all_checks_passed),
             }
         )
@@ -469,7 +556,9 @@ def main() -> None:
                 / component_raw_weights[same_od_mask].sum()
             )
             component_normalized_weights[same_od_mask] = normalized
-            final_kde_weights[same_od_mask] = same_od_mixture_weight * normalized
+            final_kde_weights[same_od_mask] = (
+                rebuilt_final_same_weight * normalized
+            )
         if similar_od_count:
             normalized = (
                 component_raw_weights[similar_od_mask]
@@ -477,7 +566,7 @@ def main() -> None:
             )
             component_normalized_weights[similar_od_mask] = normalized
             final_kde_weights[similar_od_mask] = (
-                similar_od_mixture_weight * normalized
+                (1.0 - rebuilt_final_same_weight) * normalized
             )
 
         for order_number, (
@@ -571,8 +660,8 @@ def main() -> None:
                 }
             )
 
-    target_output = run_dir / "1 随机目标与四层价格汇总.csv"
-    price_output = run_dir / "2 四层历史价格逐笔明细.csv"
+    target_output = run_dir / "1 随机目标与分层价格汇总.csv"
+    price_output = run_dir / "2 分层历史价格逐笔明细.csv"
     quantile_output = run_dir / "3 KDE的101维分位数对比.csv"
     diagnostics_output = run_dir / "4 自动核对结果.json"
     pd.DataFrame(target_rows).to_csv(target_output, index=False, encoding="utf-8-sig")
@@ -589,6 +678,8 @@ def main() -> None:
         "chosen_target_ids": [int(value) for value in chosen_ids],
         "all_targets_passed": len(failures) == 0,
         "failed_targets": failures,
+        "kde_recalculation_input": "saved_step5_float32_samples",
+        "history_rebuild_role": "candidate_and_intermediate_parameter_audit",
         "target_summary_file": str(target_output),
         "price_detail_file": str(price_output),
         "quantile_comparison_file": str(quantile_output),

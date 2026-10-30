@@ -4,8 +4,8 @@
 训练集样本数：1845504
 验证集样本数：230688
 测试集样本数：230688
-标签均值：0.560831
-标签标准差：0.941579
+标签均值：0.551695
+标签标准差：0.934863
 """
 
 from pathlib import Path
@@ -138,7 +138,8 @@ def build_text(row):
             (
                 "参考优先级：一级为本区域短期和同一时段历史需求；"
                 "二级为本区域长期需求活跃度；三级为邻近区域历史需求。"
-                "各级特征均保留，前级信息更重要，后级用于补充稀疏信息。"
+                "四级为历史OD主要来源区域的滞后流入状态。各级特征均保留，"
+                "前级信息更重要，后级用于补充稀疏信息。"
             ),
             "区域与时间状态：",
             (
@@ -160,7 +161,7 @@ def build_text(row):
             (
                 f"上一15分钟出发订单量："
                 f"{history_text(row['D_origin_i_lag1'], unit='单')}；"
-                f"上两个15分钟时段前出发订单量："
+                f"上两个15分钟时段出发订单量："
                 f"{history_text(row['D_origin_i_lag2'], unit='单')}。"
             ),
             (
@@ -192,6 +193,11 @@ def build_text(row):
                 f"{history_text(row['neighbor_D_origin_roll4_mean'], unit='单')}；"
                 f"邻近区域过去2小时平均出发订单量："
                 f"{history_text(row['neighbor_D_origin_roll8_mean'], unit='单')}。"
+            ),
+            "四级参考——历史OD主要来源区域上一时段状态：",
+            (
+                f"历史主要来源区域在上一15分钟的加权流入订单量："
+                f"{history_text(row['related_origin_inflow_lag1'], day_index >= 2, unit='单')}。"
             ),
         ]
     )

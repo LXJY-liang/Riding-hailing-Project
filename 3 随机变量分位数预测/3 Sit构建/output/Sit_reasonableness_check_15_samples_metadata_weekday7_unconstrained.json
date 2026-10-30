@@ -1,0 +1,58 @@
+{
+  "definition_of_historical_transactions": "D_origin_it: region-origin completed trips in the 15-minute decision slot",
+  "sample_start": "2024-06-11 00:00:00",
+  "sample_end": "2024-06-30 23:45:00",
+  "sample_size_per_group": 5,
+  "total_sample_count": 15,
+  "random_seed": 20240611,
+  "input_prefix": "weekday7_unconstrained",
+  "sampling_groups": [
+    "top D_origin_it decision points",
+    "random D_origin_it == 0 decision points",
+    "random D_origin_it > 0 excluding the top group"
+  ],
+  "group_summary": [
+    {
+      "sample_group": "历史成交量前5",
+      "sample_count": 5,
+      "historical_transactions_min": 321,
+      "historical_transactions_mean": 342.8,
+      "historical_transactions_max": 375,
+      "reference_supply_profile_mean": 257.20001220703125,
+      "supply_q50_mean": 202.6999969482422,
+      "supply_q50_max": 206.0,
+      "q50_covers_transactions_rate": 0.0,
+      "q95_covers_transactions_rate": 0.0
+    },
+    {
+      "sample_group": "历史成交量为0随机样本",
+      "sample_count": 5,
+      "historical_transactions_min": 0,
+      "historical_transactions_mean": 0.0,
+      "historical_transactions_max": 0,
+      "reference_supply_profile_mean": 1.7000000476837158,
+      "supply_q50_mean": 1.399999976158142,
+      "supply_q50_max": 4.0,
+      "q50_covers_transactions_rate": 1.0,
+      "q95_covers_transactions_rate": 1.0
+    },
+    {
+      "sample_group": "正成交量非前5随机样本",
+      "sample_count": 5,
+      "historical_transactions_min": 1,
+      "historical_transactions_mean": 2.4,
+      "historical_transactions_max": 4,
+      "reference_supply_profile_mean": 3.0,
+      "supply_q50_mean": 3.4000000953674316,
+      "supply_q50_max": 8.0,
+      "q50_covers_transactions_rate": 0.6,
+      "q95_covers_transactions_rate": 1.0
+    }
+  ],
+  "files": {
+    "supply_input": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/S_it_weekday7_unconstrained_quantiles.parquet",
+    "u_summary_input": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/U_it_weekday7_unconstrained_summary.parquet",
+    "csv": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/Sit_reasonableness_check_15_samples_weekday7_unconstrained.csv",
+    "parquet": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/Sit_reasonableness_check_15_samples_weekday7_unconstrained.parquet"
+  }
+}

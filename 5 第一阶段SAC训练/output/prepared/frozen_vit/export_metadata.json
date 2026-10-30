@@ -1,7 +1,7 @@
 {
   "frozen": true,
-  "head": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/4 Vit预训练模型/output/model/best_quantile_head.pt",
-  "scaler": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/4 Vit预训练模型/output/model/scaler.json",
+  "head": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/4 Vit预训练模型/2 训练与评估/output/model/best_quantile_head.pt",
+  "scaler": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/4 Vit预训练模型/1 数据准备/output/scaler.json",
   "demand_input": "原始成交量Dit的27维log1p摘要",
   "supply_input": "滚动历史高分位固定容量",
   "files": [

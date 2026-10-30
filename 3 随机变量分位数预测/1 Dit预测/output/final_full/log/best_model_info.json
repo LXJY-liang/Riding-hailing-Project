@@ -1,0 +1,33 @@
+{
+  "best_epoch": 1,
+  "best_global_step": 57672,
+  "best_valid_loss": 0.11052562986207431,
+  "loss_weighting": {
+    "demand_weighting_enabled": true,
+    "demand_bin_names": [
+      "D=0",
+      "1<=D<=2",
+      "3<=D<=5",
+      "6<=D<=10",
+      "11<=D<=35",
+      "D>=36"
+    ],
+    "demand_bin_upper_bounds": [
+      0,
+      2,
+      5,
+      10,
+      35,
+      "inf"
+    ],
+    "demand_bin_weights": [
+      0.568,
+      1.242,
+      1.203,
+      1.561,
+      1.642,
+      2.975
+    ],
+    "demand_weight_normalize_by_batch": true
+  }
+}

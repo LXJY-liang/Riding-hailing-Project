@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import importlib.util
 import json
+import re
 
 import numpy as np
 import pandas as pd
@@ -209,6 +210,7 @@ def evaluate_split(
     tokenizer,
     scaler,
     device,
+    output_tag="",
 ):
     """预测一个数据划分并保存完整原始分位数。"""
 
@@ -249,12 +251,13 @@ def evaluate_split(
     config.prediction_output_dir.mkdir(parents=True, exist_ok=True)
     config.log_dir.mkdir(parents=True, exist_ok=True)
 
+    suffix = f"_{output_tag}" if output_tag else ""
     prediction_path = (
         config.prediction_output_dir
-        / f"tauijt_{split_name}_predictions.parquet"
+        / f"tauijt_{split_name}_predictions{suffix}.parquet"
     )
-    metrics_path = config.log_dir / f"tauijt_{split_name}_metrics.json"
-    coverage_path = config.log_dir / f"tauijt_{split_name}_coverage.csv"
+    metrics_path = config.log_dir / f"tauijt_{split_name}_metrics{suffix}.json"
+    coverage_path = config.log_dir / f"tauijt_{split_name}_coverage{suffix}.csv"
 
     result.to_parquet(prediction_path, index=False)
     coverage.to_csv(coverage_path, index=False)
@@ -287,11 +290,18 @@ def parse_args():
         default=("valid", "test"),
         help="要评估的数据划分；默认依次评估 valid 和 test。",
     )
+    parser.add_argument(
+        "--output-tag",
+        default="",
+        help="可选输出标签，例如 seed42；用于保留多次稳定性实验结果。",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.output_tag and not re.fullmatch(r"[A-Za-z0-9._-]+", args.output_tag):
+        raise ValueError("--output-tag 只能包含字母、数字、点、下划线和连字符。")
     device = get_device()
     model_dtype = get_model_dtype(device)
 
@@ -334,6 +344,7 @@ def main():
             tokenizer,
             scaler,
             device,
+            args.output_tag,
         )
 
 

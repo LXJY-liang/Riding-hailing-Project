@@ -1,0 +1,11 @@
+{
+  "split": "valid",
+  "rows": 230688,
+  "days": [
+    "2024-06-25",
+    "2024-06-26",
+    "2024-06-27"
+  ],
+  "sample_denominator": 10,
+  "sample_seed": 42
+}

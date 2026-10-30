@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 import importlib.util
 import json
 
@@ -8,13 +9,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 """
-运行结果
+运行结果：
 
-训练集样本数：3555382
-验证集样本数：381568
-测试集样本数：528567
-标签均值：2.742840
-标签标准差：0.590518
+训练集样本数：3549356
+验证集样本数：380811
+测试集样本数：527658
+标签均值：2.743131
+标签标准差：0.589868
+数据来源与样本数清单：/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/4 tauijt预测/output/data/tauijt_data_manifest.json
 """
 # =========================
 # 1. 读取配置
@@ -29,6 +31,35 @@ def load_config():
 
 
 config = load_config()
+
+
+def validate_latest_feature_input():
+    """阻止旧 tauijt 特征覆盖最新异常订单清洗链。"""
+
+    required_paths = [
+        config.cleaned_od_panel_path,
+        config.feature_data_path,
+        config.feature_source_manifest_path,
+    ]
+    missing = [str(path) for path in required_paths if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "tauijt 数据处理缺少最新上游产物，请先运行特征构造：\n"
+            + "\n".join(missing)
+        )
+
+    if config.feature_data_path.stat().st_mtime < config.cleaned_od_panel_path.stat().st_mtime:
+        raise RuntimeError(
+            "tauijt特征文件早于最新OD面板，继续运行会使用旧清洗样本。"
+            "请先重新运行‘2 模型特征构建/4 tauijt特征构造.py’。"
+        )
+
+    with open(config.feature_source_manifest_path, "r", encoding="utf-8") as file:
+        source_manifest = json.load(file)
+    if source_manifest.get("od_panel_mtime_ns") != config.cleaned_od_panel_path.stat().st_mtime_ns:
+        raise RuntimeError(
+            "tauijt特征来源清单与当前OD面板不一致。请重新运行 tauijt 特征构造。"
+        )
 
 
 # =========================
@@ -78,25 +109,25 @@ weather_map = {
 
 
 def number_text(value, digits=2):
-    """将数值写入自然语言；缺失值写为历史不可用。"""
+    """将数值写入自然语言；缺失值写为“未知”。"""
 
     if pd.isna(value):
-        return "历史不可用"
+        return "未知"
 
     return f"{float(value):.{digits}f}"
 
 
 def history_text(value, available=True, digits=2, unit=""):
-    """历史可用时输出数值和单位；不可用时只输出“历史不可用”。"""
+    """历史可用时输出数值和单位；不可用时输出“未知”。"""
 
     if not available or pd.isna(value):
-        return "历史不可用"
+        return "未知"
 
     return f"{float(value):.{digits}f}{unit}"
 
 
-def time_period_text(row):
-    """描述当前时段类型。"""
+def special_period_text(row):
+    """仅描述早高峰、晚高峰和夜间等特殊时段。"""
 
     descriptions = []
 
@@ -109,14 +140,6 @@ def time_period_text(row):
     if int(row["is_night"]) == 1:
         descriptions.append("夜间")
 
-    if not descriptions:
-        descriptions.append("普通时段")
-
-    if int(row["is_weekend_or_holiday"]) == 1:
-        descriptions.append("周末或节假日")
-    else:
-        descriptions.append("工作日")
-
     return "、".join(descriptions)
 
 
@@ -125,34 +148,48 @@ def time_period_text(row):
 # =========================
 
 def build_text(row):
-    """将tau_ijt特征按参考优先级转换为固定结构的中文自然语言。"""
+    """将 tau_ijt 特征按参考优先级转换为中文自然语言。"""
 
     timestamp = pd.Timestamp(row[config.time_column])
     day_index = int(row["day_index"])
     dow = int(row["dow"])
     weather_code = int(row["weather_code"])
+    day_type = (
+        "周末或节假日"
+        if int(row["is_weekend_or_holiday"]) == 1
+        else "工作日"
+    )
+    region_relation = (
+        "是区域内订单"
+        if int(row["same_region_ij"]) == 1
+        else "不是区域内订单"
+    )
+    special_period = special_period_text(row)
+    distance_text = (
+        f"区域质心距离为{number_text(row['dist_ij'], 4)}公里，"
+        f"{region_relation}"
+    )
+    if special_period:
+        distance_text += f"，当前为{special_period}"
+    distance_text += "。"
 
     return "\n".join(
         [
             "任务：预测当前OD当前时段的订单服务时间分布。",
             (
                 "参考优先级：一级为同一OD短期和同一时段历史服务时间；"
-                "二级为同一OD长期历史服务时间；三级为相似距离范围的服务时间兜底。"
-                "各级特征均保留，前级信息更重要，后级用于补充稀疏信息。"
+                "二级为同一OD长期历史服务时间；"
+                "三级为相似距离范围的服务时间兜底。"
             ),
             "OD与时间状态：",
             (
-                f"当前OD对编号为{row[config.od_id_column]}，"
-                f"出发区域为{row[config.i_column]}，到达区域为{row[config.j_column]}，"
+                f"出发区域为{row[config.i_column]}，"
+                f"到达区域为{row[config.j_column]}，"
                 f"时间为{timestamp.strftime('%Y年%m月%d日 %H:%M')}，"
                 f"{weekday_map.get(dow, f'星期编码{dow}')}，"
-                f"这是当日第{int(row['slot_in_day'])}个15分钟时段。"
+                f"当前为{day_type}。"
             ),
-            (
-                f"区域质心距离为{number_text(row['dist_ij'], 4)}公里，"
-                f"是否区域内订单为{'是' if int(row['same_region_ij']) == 1 else '否'}，"
-                f"当前属于{time_period_text(row)}。"
-            ),
+            distance_text,
             "天气状态：",
             (
                 f"气温为{number_text(row['temperature_2m'])}摄氏度，"
@@ -197,8 +234,6 @@ def build_text(row):
             ),
             "三级参考——相似距离范围服务时间兜底：",
             (
-                f"该OD历史服务时间："
-                f"{'缺失' if int(row['od_tau_missing_flag']) == 1 else '可用'}；"
                 f"相似距离且同一时段全局平均服务时间："
                 f"{history_text(row['global_tau_by_dist_slot'], unit='分钟')}；"
                 f"相似距离OD历史平均服务时间："
@@ -252,6 +287,8 @@ def prepare_data():
     只改变大文件读取方式，其余处理流程与Dit一致。
     """
 
+    validate_latest_feature_input()
+
     train_start = pd.Timestamp(config.train_start)
     train_end = pd.Timestamp(config.train_end)
     valid_start = pd.Timestamp(config.valid_start)
@@ -293,6 +330,9 @@ def prepare_data():
         label_count += len(labels)
         label_sum += labels.sum()
         label_square_sum += np.square(labels).sum()
+
+    if label_count == 0:
+        raise ValueError("最新特征数据中没有可用于训练的非空 tauijt 标签。")
 
     if config.use_standardization:
         label_mean = label_sum / label_count
@@ -418,11 +458,29 @@ def prepare_data():
             indent=2,
         )
 
+    data_manifest = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "feature_data_path": str(config.feature_data_path),
+        "feature_data_mtime_ns": config.feature_data_path.stat().st_mtime_ns,
+        "cleaned_od_panel_path": str(config.cleaned_od_panel_path),
+        "cleaned_od_panel_mtime_ns": config.cleaned_od_panel_path.stat().st_mtime_ns,
+        "split_counts": {name: int(count) for name, count in sample_counts.items()},
+        "split_ranges": {
+            "train": [config.train_start, config.train_end],
+            "valid": [config.valid_start, config.valid_end],
+            "test": [config.test_start, config.test_end],
+        },
+        "label_scaler": scaler,
+    }
+    with open(config.data_manifest_path, "w", encoding="utf-8") as file:
+        json.dump(data_manifest, file, ensure_ascii=False, indent=2)
+
     print(f"训练集样本数：{sample_counts['train']}")
     print(f"验证集样本数：{sample_counts['valid']}")
     print(f"测试集样本数：{sample_counts['test']}")
     print(f"标签均值：{label_mean:.6f}")
     print(f"标签标准差：{label_std:.6f}")
+    print(f"数据来源与样本数清单：{config.data_manifest_path}")
 
 
 if __name__ == "__main__":

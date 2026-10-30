@@ -7,6 +7,9 @@ QWEN_DIR="${QWEN3_4B_BASE_PATH:-$PROJECT_ROOT/0 基座模型_Qwen3-4B-Base}"
 SESSION_NAME="${TAUIJT_TMUX_SESSION:-tauijt_train}"
 AUTO_SHUTDOWN="${AUTO_SHUTDOWN:-1}"
 ATTACH_AFTER_START="${ATTACH_AFTER_START:-1}"
+TAUIJT_SEED_VALUE="${TAUIJT_SEED:-42}"
+TAUIJT_SAMPLE_SEED_VALUE="${TAUIJT_SAMPLE_SEED:-$TAUIJT_SEED_VALUE}"
+TAUIJT_STRICT_DETERMINISM_VALUE="${TAUIJT_STRICT_DETERMINISM:-0}"
 LOG_DIR="$TAUIJT_DIR/output/log"
 LOG_FILE="$LOG_DIR/tauijt_train_$(date +%Y%m%d_%H%M%S).log"
 
@@ -49,6 +52,8 @@ required_paths=(
   "$TAUIJT_DIR/output/tokenized/tauijt_valid_tokenized"
   "$TAUIJT_DIR/output/model/tokenizer"
   "$TAUIJT_DIR/output/model/label_scaler.json"
+  "$TAUIJT_DIR/output/data/tauijt_data_manifest.json"
+  "$TAUIJT_DIR/output/tokenized/tauijt_tokenization_manifest.json"
   "$QWEN_DIR/config.json"
   "$QWEN_DIR/model.safetensors.index.json"
   "$QWEN_DIR/model-00001-of-00003.safetensors"
@@ -97,6 +102,7 @@ PY
 export RIDING_HAILING_PROJECT_ROOT="$PROJECT_ROOT"
 export QWEN3_4B_BASE_PATH="$QWEN_DIR"
 export PYTHONUNBUFFERED=1
+export PYTHONHASHSEED="$TAUIJT_SEED_VALUE"
 
 TRAIN_SCRIPT="$TAUIJT_DIR/5 tauijt训练.py"
 VENV_DIR="$PROJECT_ROOT/.venv"
@@ -113,6 +119,9 @@ printf -v VENV_DIR_Q "%q" "$VENV_DIR"
 printf -v VENV_ACTIVATE_Q "%q" "$VENV_ACTIVATE"
 printf -v LEGACY_VENV_DIR_Q "%q" "$LEGACY_VENV_DIR"
 printf -v LEGACY_VENV_ACTIVATE_Q "%q" "$LEGACY_VENV_ACTIVATE"
+printf -v TAUIJT_SEED_Q "%q" "$TAUIJT_SEED_VALUE"
+printf -v TAUIJT_SAMPLE_SEED_Q "%q" "$TAUIJT_SAMPLE_SEED_VALUE"
+printf -v TAUIJT_STRICT_DETERMINISM_Q "%q" "$TAUIJT_STRICT_DETERMINISM_VALUE"
 
 RESUME_EXPORT=""
 if [ -n "${TAUIJT_RESUME_FROM_CHECKPOINT:-}" ]; then
@@ -131,13 +140,14 @@ if [ "$AUTO_SHUTDOWN" = "1" ]; then
   AFTER_TRAIN="echo \"正在执行 /usr/bin/shutdown -h now 关闭实例。\" | tee -a $LOG_FILE_Q; sync; /usr/bin/shutdown -h now"
 fi
 
-TMUX_COMMAND="export RIDING_HAILING_PROJECT_ROOT=$PROJECT_ROOT_Q; export QWEN3_4B_BASE_PATH=$QWEN_DIR_Q; $RESUME_EXPORT cd $PROJECT_ROOT_Q; if [ -d $VENV_DIR_Q ]; then source $VENV_ACTIVATE_Q; elif [ -d $LEGACY_VENV_DIR_Q ]; then source $LEGACY_VENV_ACTIVATE_Q; fi; $PYTHON_BIN_Q $TRAIN_SCRIPT_Q 2>&1 | tee -a $LOG_FILE_Q; train_status=\${PIPESTATUS[0]}; echo \"Python训练进程已退出，退出码：\$train_status\" | tee -a $LOG_FILE_Q; $AFTER_TRAIN; exit \$train_status"
+TMUX_COMMAND="export RIDING_HAILING_PROJECT_ROOT=$PROJECT_ROOT_Q; export QWEN3_4B_BASE_PATH=$QWEN_DIR_Q; export TAUIJT_SEED=$TAUIJT_SEED_Q; export TAUIJT_SAMPLE_SEED=$TAUIJT_SAMPLE_SEED_Q; export TAUIJT_STRICT_DETERMINISM=$TAUIJT_STRICT_DETERMINISM_Q; export PYTHONHASHSEED=$TAUIJT_SEED_Q; $RESUME_EXPORT cd $PROJECT_ROOT_Q; if [ -d $VENV_DIR_Q ]; then source $VENV_ACTIVATE_Q; elif [ -d $LEGACY_VENV_DIR_Q ]; then source $LEGACY_VENV_ACTIVATE_Q; fi; $PYTHON_BIN_Q $TRAIN_SCRIPT_Q 2>&1 | tee -a $LOG_FILE_Q; train_status=\${PIPESTATUS[0]}; echo \"Python训练进程已退出，退出码：\$train_status\" | tee -a $LOG_FILE_Q; $AFTER_TRAIN; exit \$train_status"
 
 tmux new-session -d -s "$SESSION_NAME" "bash -lc '$TMUX_COMMAND'"
 
 echo "tauijt 正式训练已启动。"
 echo "tmux 会话：$SESSION_NAME"
 echo "训练日志：$LOG_FILE"
+echo "训练随机种子：$TAUIJT_SEED_VALUE；抽样种子（全量训练时不使用）：$TAUIJT_SAMPLE_SEED_VALUE；严格确定性：$TAUIJT_STRICT_DETERMINISM_VALUE"
 echo "进入会话：tmux attach -t '$SESSION_NAME'"
 echo "后台看日志：tail -f '$LOG_FILE'"
 if [ "$AUTO_SHUTDOWN" = "1" ]; then

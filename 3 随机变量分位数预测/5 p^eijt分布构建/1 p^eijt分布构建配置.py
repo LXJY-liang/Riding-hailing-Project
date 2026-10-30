@@ -64,6 +64,18 @@ REGION_CENTROID_FILE = INTERMEDIATE_DIR / "region_centroids.parquet"
 NORMALIZED_NEIGHBOR_FILE = INTERMEDIATE_DIR / "region_neighbors.parquet"
 NEIGHBOR_MATRIX_FILE = INTERMEDIATE_DIR / "region_neighbor_matrix.npy"
 
+# c_ij 构建流程根据芝加哥道路网络得到的静态道路距离。这里仅使用
+# d_map_miles（道路最短路径/区内代表距离），不使用由整月订单校准的
+# d_prior_miles 或 d_ij_miles，避免目标时刻之后的订单信息泄露。
+OD_ROAD_DISTANCE_FILE = (
+    PROJECT_ROOT
+    / "3 随机变量分位数预测"
+    / "6 c_ij构建"
+    / "output"
+    / "final"
+    / "c_ij.parquet"
+)
+
 # 第 4 个脚本一次性生成的纯数值计算索引。第 5、6 个脚本不再读取原始
 # 订单、做区域编号清洗或执行 pandas groupby。
 TARGET_PREPARED_FILE = INDEX_DIR / "target_units.parquet"
@@ -74,6 +86,7 @@ HISTORY_DAY_FILE = INDEX_DIR / "history_start_day.npy"
 HISTORY_SLOT_FILE = INDEX_DIR / "history_slot.npy"
 HISTORY_DOW_FILE = INDEX_DIR / "history_dow.npy"
 HISTORY_WEEKEND_HOLIDAY_FILE = INDEX_DIR / "history_weekend_or_holiday.npy"
+HISTORY_DATE_TYPE_FILE = INDEX_DIR / "history_date_type.npy"
 HISTORY_PRICE_FILE = INDEX_DIR / "history_price.npy"
 HISTORY_TRIP_MILES_FILE = INDEX_DIR / "history_trip_miles.npy"
 HISTORY_TRIP_SECONDS_FILE = INDEX_DIR / "history_trip_seconds.npy"
@@ -83,6 +96,10 @@ ORIGIN_TIME_STRICT_ORDER_FILE = INDEX_DIR / "origin_time_strict_order.npy"
 ORIGIN_TIME_STRICT_OFFSETS_FILE = INDEX_DIR / "origin_time_strict_offsets.npy"
 ORIGIN_TIME_RELAXED_ORDER_FILE = INDEX_DIR / "origin_time_relaxed_order.npy"
 ORIGIN_TIME_RELAXED_OFFSETS_FILE = INDEX_DIR / "origin_time_relaxed_offsets.npy"
+ORIGIN_DATE_TYPE_TIME_ORDER_FILE = INDEX_DIR / "origin_date_type_time_order.npy"
+ORIGIN_DATE_TYPE_TIME_OFFSETS_FILE = INDEX_DIR / "origin_date_type_time_offsets.npy"
+GLOBAL_DATE_TYPE_TIME_ORDER_FILE = INDEX_DIR / "global_date_type_time_order.npy"
+GLOBAL_DATE_TYPE_TIME_OFFSETS_FILE = INDEX_DIR / "global_date_type_time_offsets.npy"
 
 # 第 5 个脚本的中间输出：每个目标最终选中的价格、层级、两个分量
 # 带宽及相同 OD / 相似 OD 的分段混合权重。
@@ -96,7 +113,6 @@ BUILD_DIAGNOSTICS_FILE = DIAGNOSTICS_DIR / "peijt_build_diagnostics.json"
 CHECK_DIAGNOSTICS_FILE = DIAGNOSTICS_DIR / "peijt_check_diagnostics.json"
 STRUCTURAL_AUDIT_DIR = DIAGNOSTICS_DIR / "peijt_quantile_structure_audit"
 
-
 # ---------------------------------------------------------------------------
 # 2. 时间口径
 # ---------------------------------------------------------------------------
@@ -108,6 +124,13 @@ SLOTS_PER_DAY = 96
 REGION_COUNT = 801
 DOW_COUNT = 7
 WEEKEND_HOLIDAY_STATE_COUNT = 2
+DATE_TYPE_COUNT = 3
+
+# date_type：0=工作日，1=普通周末，2=节假日。节假日优先单独匹配；
+# 当严格节假日样本为空且允许放宽时，回退到工作日样本并留下标记。
+DATE_TYPE_WEEKDAY = 0
+DATE_TYPE_WEEKEND = 1
+DATE_TYPE_HOLIDAY = 2
 
 # 2024 年 6 月芝加哥本地节假日。
 # is_weekend_or_holiday = 周末或这些日期之一。
@@ -122,7 +145,7 @@ N_MIN = 50
 N_MAX = 200
 
 # 第 1—3 层均属于“相同 OD”分布，保留原有层内权重。
-# 第 4A、4B 层合并为“同时间状态+相似实际里程”分布；其样本
+# 第 4A、4B、4C 层合并为“相似时间状态+相似实际里程”分布；其样本
 # 内部权重由里程相似度给出，两个分布的混合权重由有效样本量与
 # 相似度共同决定。
 LAYER_WEIGHTS = {
@@ -130,6 +153,9 @@ LAYER_WEIGHTS = {
     2: 0.9,
     3: 0.8,
     4: 1.0,
+    # 第5层仍属于“相似OD”KDE成分；其可靠性继续由逐订单距离
+    # 相似度决定，不额外人为指定一组固定价格权重。
+    5: 1.0,
 }
 
 
@@ -187,16 +213,72 @@ def component_mixture_weights(
 TIME_NEIGHBOR_SLOTS = 4
 SPECIAL_DAY_LAGS = (1, 2, 7)
 
-# 第 4 层不再使用区域质心 OD 距离。目标 OD 的参考里程为当时
-# 已完成的同 OD 有效行程里程中位数，至少 3 笔。候选订单必须
-# 处于同一时间状态，且实际里程在参考里程的 [0.8, 1.25] 倍。
-MIN_TARGET_DISTANCE_HISTORY = 3
+# 每个目标时刻 t 的 OD 距离基准只使用 t 之前的信息：
+#   N>=10：同 OD 历史实际里程中位数；
+#   3<=N<10：历史中位数与静态道路距离的收缩组合；
+#   N<3：静态道路距离。
+# w=N/(N+DISTANCE_SHRINKAGE_KAPPA)。道路距离是低样本 OD 的先验，
+# 不是使用目标订单本身的实际里程。
+DISTANCE_DIRECT_HISTORY_THRESHOLD = 10
+MIN_DISTANCE_HISTORY_FOR_SHRINKAGE = 3
+DISTANCE_SHRINKAGE_KAPPA = 6.0
+
+# 所有层的候选订单先通过“自身实际里程/自身OD滚动距离基准”检查，
+# 防止绕路、中途停靠等路线不一致订单进入价格分布。先采用较宽的
+# [0.50, 2.00]；后续可以根据输出诊断做敏感性分析，但不得取消检查。
+SELF_ROUTE_RATIO_MIN = 0.50
+SELF_ROUTE_RATIO_MAX = 2.00
+
+# 超短距离不能只用比例判断。例如参考距离为0.10英里时，普通比例
+# 区间过窄，会把真实的0.20—0.30英里订单错误排除。以下规则从第1层
+# 起统一生效，而不是等到所有回退失败后才单独补算：
+# 1. 候选订单自身OD参考距离不超过0.50英里时，自身路线检查同时接受
+#    绝对里程差不超过0.25英里的订单；
+# 2. 目标OD参考距离不超过0.25英里时，相似OD匹配同时接受绝对里程差
+#    不超过0.25英里的订单。
+# 两个条件均与原比例条件取“或”，物理速度、完成时间和行程类型检查
+# 仍然必须满足。
+SHORT_CANDIDATE_REFERENCE_MAX_MILES = 0.50
+SHORT_TARGET_REFERENCE_MAX_MILES = 0.25
+SHORT_DISTANCE_ABSOLUTE_TOLERANCE_MILES = 0.25
+
+# 第 4A/4B/4C 还要求候选订单实际里程与目标 OD 距离基准一致。
 TRIP_MILES_RATIO_MIN = 0.80
 TRIP_MILES_RATIO_MAX = 1.25
 MIN_VALID_TRIP_SECONDS = 60.0
 MIN_VALID_SPEED_MPH = 1.0
 MAX_VALID_SPEED_MPH = 80.0
 DISTANCE_SIMILARITY_LOG_SCALE = float(np.log(TRIP_MILES_RATIO_MAX))
+
+# 第 4 层的时间窗口与空间回退：
+# 4A：相同起点、不同终点；4B：邻近起点、邻近终点；
+# 4C：不再要求区域相邻，只要求同为区内/区间行程且实际里程相近。
+# 三者均使用相同日期类型、目标时段前后 4 个 15 分钟位置。
+LAYER4_TIME_NEIGHBOR_SLOTS = 4
+LAYER4_SUBLEVEL_RELIABILITY = {
+    "4A": 1.00,
+    "4B": 0.75,
+    "4C": 0.50,
+}
+MAX_RAW_CANDIDATES_PER_SUBLAYER = 5_000
+
+# 第5层只在第1—4C层结束后仍然没有同OD样本，且相似OD样本少于
+# SIMILAR_ONLY_MIN_SAMPLES 时启用。5A/5B使用前后2小时，5C/5D
+# 使用前后4小时；时间位置按一天96个15分钟位置循环计算，因此
+# 23:45与00:00能够被识别为相邻时段。5D才小幅放宽目标距离范围。
+# 5E不是“最后再运行”的时间/空间回退层，而是5A—5D每次筛选时并行
+# 生效的超短距离绝对容差分支。被原比例条件拒绝、但被合法绝对容差
+# 接受的第5层订单标记为5E，以便审计；因此合理短途订单从第一次遇到
+# 时就会被保留，不会先删除再补回。
+LAYER5_TIME_NEIGHBOR_SLOTS_SHORT = 8
+LAYER5_TIME_NEIGHBOR_SLOTS_LONG = 16
+LAYER5_DISTANCE_RATIO_MIN = 0.75
+LAYER5_DISTANCE_RATIO_MAX = 1.33
+
+# 第6步的内生结构修正。先按基准权重生成KDE；若稀疏同OD成分与
+# 相似OD成分造成 q30/q50 低于审计阈值，则按同OD订单路线一致性连续
+# 折减其有效质量并重算。该规则取代旧的target_id权重覆盖表。
+ADAPTIVE_REWEIGHT_MAX_SAME_OD_COUNT = 2
 
 # 自动审计阈值：若 Q_0.30 < 0.3 * Q_0.50，则记录为结构性异常。
 Q30_TO_Q50_AUDIT_MIN = 0.30

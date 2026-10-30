@@ -113,6 +113,7 @@ feature_columns = [
     "neighbor_D_origin_lag1",
     "neighbor_D_origin_roll4_mean",
     "neighbor_D_origin_roll8_mean",
+    "related_origin_inflow_lag1",
 ]
 
 all_columns = feature_columns + [label_column]
@@ -169,7 +170,7 @@ crossing_loss_weight = 0.0
 # 按真实Dit区间进行样本加权，缓解D=0样本过多导致的训练目标偏保守。
 # 权重来自 w_b = min((1 / (B * p_b)) ** gamma, w_max) 的温和平滑截断版本。
 demand_weighting_enabled = True
-demand_weight_gamma = 0.5
+demand_weight_gamma = 0.4
 demand_weight_max = 5.0
 demand_bin_names = [
     "D=0",
@@ -180,7 +181,7 @@ demand_bin_names = [
     "D>=36",
 ]
 demand_bin_upper_bounds = [0, 2, 5, 10, 35, float("inf")]
-demand_bin_weights = [0.494, 1.312, 1.260, 1.744, 1.856, 3.904]
+demand_bin_weights = [0.568, 1.242, 1.203, 1.561, 1.642, 2.975]
 demand_weight_normalize_by_batch = True
 demand_zero_tolerance = 1e-6
 
@@ -195,8 +196,8 @@ train_batch_size = 8
 # 理论上每个epoch的micro-batch数量会从现在的 922752 降到约 230688
 eval_batch_size = 16
 gradient_accumulation_steps = 4
-train_sample_fraction = 0.12
-checkpoint_save_steps = 500
+train_sample_fraction = 1.0
+checkpoint_save_steps = 5000
 validation_steps = 10000
 resume_from_checkpoint = os.environ.get("DIT_RESUME_FROM_CHECKPOINT")
 

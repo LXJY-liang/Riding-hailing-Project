@@ -1,0 +1,12 @@
+{
+  "generated_at_utc": "2026-10-22T12:50:45.809273+00:00",
+  "cleaned_order_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/1_4 异常订单清洗_保留订单.parquet",
+  "cleaned_order_mtime_ns": 1792461491966991516,
+  "od_panel_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/2_3 OD-15min聚合（补全时间、不管没出现的OD）结果.parquet",
+  "od_panel_mtime_ns": 1792465530728219844,
+  "feature_file": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/2 模型特征构建/4 tauijt特征构造（结果）.parquet",
+  "feature_mtime_ns": 1792673445807493644,
+  "total_rows": 594800640,
+  "trainable_label_rows": 4457825,
+  "global_tau_mean": 17.49609155638303
+}

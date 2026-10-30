@@ -1,0 +1,65 @@
+{
+  "model_type": "pooled_grouped_mean_reverting_gaussian_U_distribution",
+  "calibration_start": "2024-06-01 00:00:00",
+  "calibration_end": "2024-06-30 23:45:00",
+  "simulation_start": "2024-06-11 00:00:00",
+  "region_count": 801,
+  "time_count": 2880,
+  "pseudo_label_count": 2306079,
+  "region_group_count": 5,
+  "group_distribution_count": 3360,
+  "day_type_definition": "0=Monday, ..., 6=Sunday",
+  "initial": {
+    "initial_city_departures": 3275,
+    "initial_city_supply": 6550,
+    "initial_utilization": 0.5,
+    "initial_nonzero_regions": 414,
+    "initial_supply_max": 460.0
+  },
+  "reference_reconstruction": {
+    "target_utilization": 0.75,
+    "adjustment_speed": 0.5,
+    "lookahead_slots": 2,
+    "historical_current_demand_floor_used": true,
+    "historical_future_information_used_for_calibration": true
+  },
+  "learned_parameters": {
+    "temporal_ar": 0.5463575099973891,
+    "common_shock_share": 0.004897788515862124,
+    "minimum_normalized_std": 0.05,
+    "global_response_speed": 0.6745514669551429,
+    "group_response_speed_minimum": 0.05000000074505806,
+    "group_response_speed_median": 0.44276195764541626,
+    "group_response_speed_maximum": 0.9237194657325745,
+    "response_speed_definition": "two-sided historical-profile-gap OLS by region_group/day_type/slot, shrunk toward the global estimate",
+    "seasonal_mean_centered_within_group_day_type": true,
+    "region_offset_saved_for_audit_only": true,
+    "region_offset_reused_during_generation": false
+  },
+  "historical_supply_profile": {
+    "definition": "median reconstructed S_reference by region/day_type/15-minute slot",
+    "row_count": 538272,
+    "minimum": 0.0,
+    "maximum": 385.5,
+    "uses_predicted_D": false
+  },
+  "generation_supply_target": {
+    "definition": "historical reconstructed supply profile",
+    "uses_predicted_D": false,
+    "mean_reversion_prevents_cumulative_supply_drift": true
+  },
+  "reference_projection_rate": 0.017123871298424728,
+  "pseudo_u_mean": -0.0013750613434240222,
+  "pseudo_u_std": 5.024778366088867,
+  "reference_supply_min": 0.0,
+  "reference_supply_max": 542.0,
+  "pseudo_labels_saved": false,
+  "files": {
+    "historical_reference_supply": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/S_it_historical_reference.parquet",
+    "region_model": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/u_distribution_model/u_region_groups.parquet",
+    "group_model": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/u_distribution_model/u_group_distribution.parquet",
+    "initial_supply": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/u_distribution_model/supply_at_2024-06-10_2345.parquet",
+    "historical_supply_profile": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/3 Sit构建/output/u_distribution_model/historical_supply_profile.parquet",
+    "pseudo_labels": null
+  }
+}

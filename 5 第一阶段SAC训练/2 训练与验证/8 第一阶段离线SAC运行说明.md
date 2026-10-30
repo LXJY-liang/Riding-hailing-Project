@@ -25,18 +25,16 @@ python "5 第一阶段SAC训练/1 训练前的准备/4 将Dit转换为潜在需�
 python "5 第一阶段SAC训练/1 训练前的准备/5 整理离线日级Episode.py" \
   --splits train valid
 
-# 只编码新episode必需且尚未编码的状态；已有结果会被保留。
-python "4 Vit预训练模型/2 训练与评估/4 导出Vit训练所需状态编码.py" \
-  --splits train valid
-
-python "5 第一阶段SAC训练/1 训练前的准备/6 导出冻结Vit价值分布.py" \
-  --splits train valid --overwrite
+# Vit的编码、预测与导出现在全部位于Vit目录，覆盖6月11—24日。
+python "4 Vit预训练模型/2 训练与评估/4 导出Vit预测期状态编码.py"
+python "4 Vit预训练模型/2 训练与评估/5 预测并导出离线SAC使用的Vit分布.py"
 
 python "5 第一阶段SAC训练/1 训练前的准备/7 检查第一阶段离线输入.py" \
   --splits train valid
 ```
 
-测试集Dit、tau和512维编码齐备后，把`test`加入相同命令。
+当前新Vit流程按已确定口径只导出SAC训练期6月11—24日。
+如后续需要对6月25日以后做样本外验证，必须另行构建对应日期的Vit预测结果。
 
 其中滚动供给和Dit转换可在本地运行。Qwen的512维编码补全应在GPU服务器运行；
 最终101维Vit缓存只运行冻结的小型分位数头，本地或服务器均可快速完成。

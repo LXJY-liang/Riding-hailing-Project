@@ -1,45 +1,5 @@
 {
   "rule": "q30 < 0.30 * q50",
-  "target_count": 196,
-  "constituent_price_rows": 1470,
-  "split_counts": {
-    "before_train": 49,
-    "test": 25,
-    "train": 101,
-    "valid": 21
-  },
-  "flag_counts": {
-    "lower_tail_leakage_flag": 18,
-    "separated_components_flag": 130,
-    "large_bandwidth_flag": 62,
-    "small_total_sample_flag": 192,
-    "small_same_od_sample_flag": 195
-  },
-  "sample_count_summary": {
-    "count": 196.0,
-    "mean": 7.5,
-    "std": 9.674444262843824,
-    "min": 2.0,
-    "25%": 4.0,
-    "50%": 5.0,
-    "75%": 7.0,
-    "max": 69.0
-  },
-  "q30_to_q50_ratio_summary": {
-    "count": 196.0,
-    "mean": 0.23012076662069478,
-    "std": 0.06623964060292813,
-    "min": 7.546087999799056e-06,
-    "25%": 0.20216673985123634,
-    "50%": 0.25276796519756317,
-    "75%": 0.2791745737195015,
-    "max": 0.2999359369277954
-  },
-  "output_files": {
-    "target_summary": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/diagnostics/peijt_extreme_q30_q50_audit/1_196条异常目标诊断汇总.csv",
-    "constituent_prices": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/diagnostics/peijt_extreme_q30_q50_audit/2_196条异常目标构成价格明细.csv",
-    "layer_statistics": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/diagnostics/peijt_extreme_q30_q50_audit/3_196条异常目标分层价格统计.csv",
-    "quantiles": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/diagnostics/peijt_extreme_q30_q50_audit/4_196条异常目标101维分位数.csv",
-    "four_layer_price_lists": "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/3 随机变量分位数预测/5 p^eijt分布构建/output/diagnostics/peijt_extreme_q30_q50_audit/5_196条异常目标四层具体价格清单.csv"
-  }
+  "target_count": 0,
+  "message": "重建结果中没有发现满足该规则的结构异常目标。"
 }

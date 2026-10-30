@@ -17,7 +17,28 @@ OUTPUT_DIR = STAGE_DIR / "output"
 PREPARED_DIR = OUTPUT_DIR / "prepared"
 POTENTIAL_DEMAND_DIR = PREPARED_DIR / "potential_demand"
 EPISODE_DIR = PREPARED_DIR / "episodes"
-FROZEN_VIT_DIR = PREPARED_DIR / "frozen_vit"
+NEW_FROZEN_VIT_DIR = (
+    ROOT / "4 Vit预训练模型" / "2 训练与评估"
+    / "output" / "prediction" / "frozen_vit"
+)
+LEGACY_FROZEN_VIT_DIR = PREPARED_DIR / "frozen_vit"
+_vit_dir_override = os.environ.get("FROZEN_VIT_DIR")
+_new_vit_train_complete = all(
+    (NEW_FROZEN_VIT_DIR / f"vit_quantiles_{day}.npz").exists()
+    for day in np.arange(
+        np.datetime64("2024-06-11", "D"),
+        np.datetime64("2024-06-25", "D"),
+        dtype="datetime64[D]",
+    ).astype(str)
+)
+if _vit_dir_override:
+    FROZEN_VIT_DIR = Path(_vit_dir_override).expanduser().resolve()
+elif _new_vit_train_complete:
+    # 新Vit的14个训练日全部齐备后，SAC才原子切换到Vit目录。
+    FROZEN_VIT_DIR = NEW_FROZEN_VIT_DIR
+else:
+    # 新模型尚未完成时保留对现有SAC产物的兼容，不中断当前程序。
+    FROZEN_VIT_DIR = LEGACY_FROZEN_VIT_DIR
 MODEL_DIR = OUTPUT_DIR / "model"
 LOG_DIR = OUTPUT_DIR / "log"
 EVALUATION_DIR = OUTPUT_DIR / "evaluation"
@@ -52,10 +73,12 @@ COST_FILE = (
 )
 
 VIT_PRETRAIN_DIR = ROOT / "4 Vit预训练模型"
-VIT_MODEL_DIR = VIT_PRETRAIN_DIR / "output" / "model"
+VIT_MODEL_DIR = VIT_PRETRAIN_DIR / "2 训练与评估" / "output" / "model"
 VIT_QUANTILE_HEAD_FILE = VIT_MODEL_DIR / "best_quantile_head.pt"
-VIT_SCALER_FILE = VIT_MODEL_DIR / "scaler.json"
-VIT_STATE_FEATURE_DIR = VIT_PRETRAIN_DIR / "output" / "state_features"
+VIT_SCALER_FILE = VIT_PRETRAIN_DIR / "1 数据准备" / "output" / "scaler.json"
+VIT_STATE_FEATURE_DIR = (
+    VIT_PRETRAIN_DIR / "2 训练与评估" / "output" / "state_features"
+)
 VIT_MODEL_CODE = VIT_PRETRAIN_DIR / "2 训练与评估" / "1 定义Vit分位数模型.py"
 VIT_STATE_FEATURE_DIM = 512
 
@@ -132,7 +155,12 @@ GRADIENT_UPDATES_PER_TIME_STEP = 1
 
 LAMBDA_PASSENGER_INIT = 6.0
 LAMBDA_DRIVER_INIT = 0.0
+# 每16个15分钟时段（即4小时）更新一次乘客/司机全局乘子。
+# 每次使用该4小时内所有有效OD的逐OD非负违反度平均值，
+# 不使用随机抽取的32个固定历史转移mini-batch更新乘子。
 LAMBDA_UPDATE_INTERVAL_STEPS = 16
+# 每日6次乘子更新，因此单次学习率为0.2/6，保持原定的
+# 日级名义更新尺度0.2。
 LAMBDA_LR = 2e-1 / (STEPS_PER_DAY // LAMBDA_UPDATE_INTERVAL_STEPS)
 LAMBDA_MAX = 100.0
 RANDOM_SEED = 42

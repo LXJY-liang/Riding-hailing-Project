@@ -3,9 +3,9 @@
   "citation": "",
   "config_name": "default",
   "dataset_name": "parquet",
-  "dataset_size": 106338092,
+  "dataset_size": 106155299,
   "description": "",
-  "download_size": 106531112,
+  "download_size": 106462902,
   "features": {
     "input_ids": {
       "feature": {
@@ -28,12 +28,12 @@
   },
   "homepage": "",
   "license": "",
-  "size_in_bytes": 212869204,
+  "size_in_bytes": 212618201,
   "splits": {
     "train": {
       "name": "train",
-      "num_bytes": 106338092,
-      "num_examples": 528567,
+      "num_bytes": 106155299,
+      "num_examples": 527658,
       "dataset_name": "parquet"
     }
   },

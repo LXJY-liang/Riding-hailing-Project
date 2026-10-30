@@ -1,5 +1,13 @@
 {
   "best_epoch": 1,
-  "best_global_step": 13333,
-  "best_valid_loss": 0.11724926380166288
+  "best_global_step": 110918,
+  "best_valid_loss": 0.11105919756897475,
+  "seed": 42,
+  "sample_seed": 42,
+  "strict_determinism": false,
+  "train_sample_fraction": 1.0,
+  "validation_sample_fraction": 0.3333333333333333,
+  "validation_sample_seed": 42,
+  "validation_sample_count": 126937,
+  "validation_original_count": 380811
 }

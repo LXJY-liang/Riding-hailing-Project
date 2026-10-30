@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
-"""在验证集或测试集上评估预训练Vit分位数曲线。"""
+"""加载训练中选出的最佳模型，评估6月25—27日完整独立验证集。"""
 
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import json
 from pathlib import Path
 
 import numpy as np
 import torch
-from datasets import load_from_disk
+from datasets import concatenate_datasets, load_from_disk
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -50,15 +49,24 @@ class Collator:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--split", choices=("valid", "test"), default="valid")
-    args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if device.type == "cuda" and torch.cuda.is_bf16_supported() else (
         torch.float16 if device.type == "cuda" else torch.float32
     )
     tokenizer = AutoTokenizer.from_pretrained(cfg.TOKENIZER_DIR, local_files_only=True, trust_remote_code=True)
-    data = load_from_disk(str(cfg.TOKENIZED_SPLIT_DIRS[args.split]))
+    ready = json.loads(cfg.VALIDATION_READY_FILE.read_text(encoding="utf-8"))
+    if int(ready.get("rows", 0)) != cfg.EXPECTED_VALID_ROWS:
+        raise ValueError(f"验证集READY标记错误：{ready}")
+    data = concatenate_datasets(
+        [
+            load_from_disk(str(cfg.TOKENIZED_VALID_PART_DIR / f"vit_valid_{day:%Y-%m-%d}"))
+            for day in cfg.days("valid")
+        ]
+    )
+    if len(data) != cfg.EXPECTED_VALID_ROWS:
+        raise ValueError(
+            f"完整验证集应为{cfg.EXPECTED_VALID_ROWS:,}行，实际{len(data):,}行。"
+        )
     loader = DataLoader(
         data,
         batch_size=cfg.EVAL_BATCH_SIZE,
@@ -83,7 +91,7 @@ def main() -> None:
     count = 0
     median_index = int(np.argmin(np.abs(cfg.QUANTILE_LEVELS - 0.50)))
     with torch.inference_mode():
-        for batch in tqdm(loader, desc=f"评估 {args.split}", dynamic_ncols=True):
+        for batch in tqdm(loader, desc="6月25—27日完整验证集", dynamic_ncols=True):
             prediction = model(
                 batch["input_ids"].to(device, non_blocking=True),
                 batch["attention_mask"].to(device, non_blocking=True),
@@ -98,12 +106,16 @@ def main() -> None:
             count += len(target)
 
     metrics = {
-        "split": args.split,
+        "data": "2024-06-25至2024-06-27完整独立验证集",
+        "model_selection": (
+            "训练进度20%/40%/60%/80%/100%的固定"
+            f"1/{cfg.VALIDATION_SAMPLE_DENOMINATOR}验证子集最低损失"
+        ),
         "rows": count,
         "mean_absolute_quantile_curve_error": curve_error / (count * len(cfg.QUANTILE_LEVELS)),
         "q50_mae": median_error / count,
     }
-    output = cfg.LOG_DIR / f"evaluation_{args.split}.json"
+    output = cfg.LOG_DIR / "evaluation_valid_full.json"
     with output.open("w", encoding="utf-8") as stream:
         json.dump(metrics, stream, ensure_ascii=False, indent=2)
     print(json.dumps(metrics, ensure_ascii=False, indent=2))

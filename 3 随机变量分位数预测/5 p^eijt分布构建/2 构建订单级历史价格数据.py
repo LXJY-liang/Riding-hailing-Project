@@ -7,11 +7,13 @@
 
 价格不包含小费。后续主程序仅在 completion_time < 目标 t 时才允许使用
 该订单，因此不会将尚未完成的订单泄漏到当前估算中。行程里程和时长
-同时保留，仅用于第 4 层相似行程筛选，不使用价格本身筛选候选样本。
+同时保留，用于各层候选订单的自身路线一致性检查，以及第4层与目标
+OD的距离相似检查；候选筛选不使用订单价格本身。
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 from pathlib import Path
 
@@ -31,6 +33,16 @@ def load_config():
 
 
 cfg = load_config()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="构建订单级滚动历史价格表。")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="仅覆盖本脚本管理的订单级历史价格文件。",
+    )
+    return parser.parse_args()
 
 
 def clean_region_id(series: pd.Series) -> pd.Series:
@@ -58,6 +70,7 @@ def chicago_region_set() -> set[str]:
 
 
 def main() -> None:
+    args = parse_args()
     cfg.ensure_output_directories()
     valid_regions = chicago_region_set()
 
@@ -78,10 +91,13 @@ def main() -> None:
         raise ValueError(f"逐笔订单文件缺少字段：{missing}")
 
     if cfg.ORDER_HISTORY_FILE.exists():
-        raise FileExistsError(
-            f"输出已存在：{cfg.ORDER_HISTORY_FILE}。"
-            "请先人工确认后删除，避免意外覆盖。"
-        )
+        if args.overwrite:
+            cfg.ORDER_HISTORY_FILE.unlink()
+        else:
+            raise FileExistsError(
+                f"输出已存在：{cfg.ORDER_HISTORY_FILE}。"
+                "如确认重建，请使用 --overwrite。"
+            )
 
     writer: pq.ParquetWriter | None = None
     history_id_offset = 0

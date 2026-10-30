@@ -29,6 +29,16 @@ feature_data_path = (
     / "2 模型特征构建"
     / "4 tauijt特征构造（结果）.parquet"
 )
+cleaned_od_panel_path = (
+    project_root
+    / "1 数据清洗"
+    / "2_3 OD-15min聚合（补全时间、不管没出现的OD）结果.parquet"
+)
+feature_source_manifest_path = (
+    project_root
+    / "2 模型特征构建"
+    / "4 tauijt特征构造（结果）_来源.json"
+)
 
 output_dir = code_dir / "output"
 data_output_dir = output_dir / "data"
@@ -52,6 +62,8 @@ quantile_head_path = model_output_dir / "best_quantile_head.pt"
 label_scaler_path = model_output_dir / "label_scaler.json"
 training_history_path = log_dir / "training_history.csv"
 best_model_info_path = log_dir / "best_model_info.json"
+data_manifest_path = data_output_dir / "tauijt_data_manifest.json"
+tokenization_manifest_path = tokenized_output_dir / "tauijt_tokenization_manifest.json"
 
 
 # =========================
@@ -168,15 +180,25 @@ crossing_loss_weight = 0.0
 # 7. 训练设置
 # =========================
 
-seed = 42
-train_sample_fraction = 0.12
+seed = int(os.environ.get("TAUIJT_SEED", "42"))
+sample_seed = int(os.environ.get("TAUIJT_SAMPLE_SEED", str(seed)))
+strict_determinism = os.environ.get(
+    "TAUIJT_STRICT_DETERMINISM",
+    "0",
+).strip().lower() in {"1", "true", "yes", "on"}
+# 使用全部训练集；不再进行12%子样本抽取。
+train_sample_fraction = 1.0
 num_epochs = 1
 train_batch_size = 8
 eval_batch_size = 16
 gradient_accumulation_steps = 4
-checkpoint_save_steps = 500
-# 12%抽样时约13333个optimizer step，本轮默认只在epoch末做全量验证。
-validation_steps = 20000
+# 全量训练约11.1万个optimizer step；每5000步保存一次恢复点。
+checkpoint_save_steps = 5000
+# 约在30k、60k、90k和epoch末验证，共4次。
+validation_steps = 30000
+# 每次使用同一份固定的1/3验证子集，样本量约等于1天。
+validation_sample_fraction = 1 / 3
+validation_sample_seed = seed
 resume_from_checkpoint = os.environ.get("TAUIJT_RESUME_FROM_CHECKPOINT")
 
 lora_learning_rate = 5e-5

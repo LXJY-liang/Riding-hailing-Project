@@ -7,6 +7,7 @@ QWEN_DIR="${QWEN3_4B_BASE_PATH:-$PROJECT_ROOT/0 基座模型_Qwen3-4B-Base}"
 SESSION_NAME="${TAUIJT_EVAL_TMUX_SESSION:-tauijt_eval_valid}"
 AUTO_SHUTDOWN="${AUTO_SHUTDOWN:-1}"
 ATTACH_AFTER_START="${ATTACH_AFTER_START:-1}"
+EVAL_TAG="${TAUIJT_EVAL_TAG:-}"
 LOG_DIR="$TAUIJT_DIR/output/log"
 LOG_FILE="$LOG_DIR/tauijt_eval_valid_$(date +%Y%m%d_%H%M%S).log"
 
@@ -94,6 +95,16 @@ for name in PROJECT_ROOT QWEN_DIR PYTHON_BIN EVAL_SCRIPT LOG_FILE VENV_DIR VENV_
   printf -v "${name}_Q" '%q' "${!name}"
 done
 
+EVAL_TAG_ARGUMENT=""
+if [ -n "$EVAL_TAG" ]; then
+  if [[ ! "$EVAL_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "TAUIJT_EVAL_TAG只能包含字母、数字、点、下划线和连字符。" >&2
+    exit 1
+  fi
+  printf -v EVAL_TAG_Q '%q' "$EVAL_TAG"
+  EVAL_TAG_ARGUMENT="--output-tag $EVAL_TAG_Q"
+fi
+
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
   echo "tmux session 已存在：$SESSION_NAME" >&2
   echo "进入会话：tmux attach -t '$SESSION_NAME'" >&2
@@ -105,7 +116,7 @@ if [ "$AUTO_SHUTDOWN" = "1" ]; then
   AFTER_EVAL="echo \"正在执行 /usr/bin/shutdown -h now 关闭实例。\" | tee -a $LOG_FILE_Q; sync; /usr/bin/shutdown -h now"
 fi
 
-TMUX_COMMAND="export RIDING_HAILING_PROJECT_ROOT=$PROJECT_ROOT_Q; export QWEN3_4B_BASE_PATH=$QWEN_DIR_Q; cd $PROJECT_ROOT_Q; if [ -d $VENV_DIR_Q ]; then source $VENV_ACTIVATE_Q; elif [ -d $LEGACY_VENV_DIR_Q ]; then source $LEGACY_VENV_ACTIVATE_Q; fi; $PYTHON_BIN_Q $EVAL_SCRIPT_Q --splits valid 2>&1 | tee -a $LOG_FILE_Q; eval_status=\${PIPESTATUS[0]}; echo \"Python评估进程已退出，退出码：\$eval_status\" | tee -a $LOG_FILE_Q; $AFTER_EVAL; exit \$eval_status"
+TMUX_COMMAND="export RIDING_HAILING_PROJECT_ROOT=$PROJECT_ROOT_Q; export QWEN3_4B_BASE_PATH=$QWEN_DIR_Q; cd $PROJECT_ROOT_Q; if [ -d $VENV_DIR_Q ]; then source $VENV_ACTIVATE_Q; elif [ -d $LEGACY_VENV_DIR_Q ]; then source $LEGACY_VENV_ACTIVATE_Q; fi; $PYTHON_BIN_Q $EVAL_SCRIPT_Q --splits valid $EVAL_TAG_ARGUMENT 2>&1 | tee -a $LOG_FILE_Q; eval_status=\${PIPESTATUS[0]}; echo \"Python评估进程已退出，退出码：\$eval_status\" | tee -a $LOG_FILE_Q; $AFTER_EVAL; exit \$eval_status"
 
 tmux new-session -d -s "$SESSION_NAME" "bash -lc '$TMUX_COMMAND'"
 
@@ -113,6 +124,9 @@ echo "tauijt 验证集评估已启动。"
 echo "tmux 会话：$SESSION_NAME"
 echo "评估日志：$LOG_FILE"
 echo "仅评估 valid，不会误跑 test。"
+if [ -n "$EVAL_TAG" ]; then
+  echo "稳定性实验输出标签：$EVAL_TAG"
+fi
 if [ "$AUTO_SHUTDOWN" = "1" ]; then
   echo "Python评估进程退出后将自动关机。"
 fi

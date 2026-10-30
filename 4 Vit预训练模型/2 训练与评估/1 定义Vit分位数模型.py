@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import re
 from pathlib import Path
 
@@ -24,7 +23,7 @@ spec.loader.exec_module(cfg)
 
 
 def lora_targets(backbone: nn.Module) -> list[str]:
-    """只对Qwen最后12层q_proj/v_proj训练LoRA，减少时间和显存。"""
+    """只对Qwen第32—35层q_proj/v_proj训练LoRA，减少时间和显存。"""
 
     pattern = re.compile(r"(?:^|\.)layers\.(\d+)\.")
     targets = []
@@ -59,7 +58,7 @@ class VitStateProjection(nn.Module):
 class VitQuantileHead(nn.Module):
     """输入512维状态、动态供给和27维需求分布摘要，输出单调101维分位数。"""
 
-    def __init__(self, scaled_value_min: float):
+    def __init__(self):
         super().__init__()
         self.feature = nn.Sequential(
             nn.LayerNorm(cfg.STATE_FEATURE_DIM + 1 + cfg.DEMAND_FEATURE_DIM),
@@ -68,7 +67,6 @@ class VitQuantileHead(nn.Module):
             nn.Dropout(cfg.HEAD_DROPOUT),
         )
         self.raw_output = nn.Linear(cfg.HEAD_HIDDEN_DIM, len(cfg.QUANTILE_LEVELS))
-        self.register_buffer("scaled_value_min", torch.tensor(float(scaled_value_min)))
         self.register_buffer(
             "quantile_gaps",
             torch.as_tensor(cfg.QUANTILE_LEVELS[1:] - cfg.QUANTILE_LEVELS[:-1]).unsqueeze(0),
@@ -86,7 +84,8 @@ class VitQuantileHead(nn.Module):
             [scaled_log_supply.unsqueeze(-1), scaled_demand_summary], dim=-1
         )
         raw = self.raw_output(self.feature(torch.cat([state_feature.float(), dynamic.float()], dim=-1)))
-        lower = self.scaled_value_min + F.softplus(raw[:, :1])
+        # 最低分位点不设0下界；只约束后续分位点单调不下降。
+        lower = raw[:, :1]
         increments = F.softplus(raw[:, 1:]) * self.quantile_gaps
         return torch.cat([lower, lower + increments.cumsum(dim=1)], dim=1)
 
@@ -128,11 +127,8 @@ class VitQuantileModel(nn.Module):
                 if parameter.requires_grad:
                     parameter.data = parameter.data.float()
 
-        with cfg.SCALER_FILE.open("r", encoding="utf-8") as stream:
-            scaler = json.load(stream)
-        scaled_min = -float(scaler["label_mean"]) / float(scaler["label_std"])
         self.state_projection = VitStateProjection(self.backbone.config.hidden_size).float()
-        self.quantile_head = VitQuantileHead(scaled_min).float()
+        self.quantile_head = VitQuantileHead().float()
 
     def encode(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         outputs = self.backbone(

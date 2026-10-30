@@ -7,13 +7,24 @@
    2_3 OD-15min聚合（补全时间、不管没出现的OD）结果.parquet 构造 tau_ijt 特征；
 2. 每个样本单位为 (i, j, t)；
 3. tau_ijt_label = tau_bar_ijt，但仅当 D_ijt_observed > 0 时有效，否则为 NaN；
-4. 使用矩阵方式快速构造同一OD短期历史服务时间特征；
-5. 使用矩阵方式快速构造同一OD长期服务时间特征；
-6. 使用全月相似距离统计构造兜底特征；
-7. 输出 parquet 文件。
+4. 构造同一 OD 的短期历史服务时间特征；
+5. 构造同一 OD 的长期历史服务时间特征；
+6. 构造相似距离兜底特征；
+7. 输出 parquet 文件及来源清单。
 """
 
-import os
+"""
+运行结果：
+输出文件： /Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/2 模型特征构建/4 tauijt特征构造（结果）.parquet
+总样本数： 594800640
+tau_ijt_label 非空样本数： 4457825
+全局平均服务时间： 17.49609155638303
+来源清单： /Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/2 模型特征构建/4 tauijt特征构造（结果）_来源.json
+"""
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -24,17 +35,34 @@ import pyarrow.parquet as pq
 # 1. 路径设置
 # ============================================================
 
-# 该文件已由最新的1_4异常订单清洗结果重新聚合生成。
-INPUT_FILE = "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/1 数据清洗/2_3 OD-15min聚合（补全时间、不管没出现的OD）结果.parquet"
+CODE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CODE_DIR.parent
 
-OUTPUT_DIR = "/Users/liangxue/Documents/8、Python文件-网约车数据/Riding hailing_Project/2 模型特征构建"
-
-OUTPUT_FILE = os.path.join(
-    OUTPUT_DIR,
-    "4 tauijt特征构造（结果）.parquet"
+# tauijt 必须沿用“删除异常订单”之后重新生成的 OD-15min 面板。
+CLEANED_ORDER_FILE = (
+    PROJECT_ROOT / "1 数据清洗" / "1_4 异常订单清洗_保留订单.parquet"
 )
+INPUT_FILE = (
+    PROJECT_ROOT
+    / "1 数据清洗"
+    / "2_3 OD-15min聚合（补全时间、不管没出现的OD）结果.parquet"
+)
+OUTPUT_DIR = CODE_DIR
+OUTPUT_FILE = OUTPUT_DIR / "4 tauijt特征构造（结果）.parquet"
+SOURCE_MANIFEST_FILE = OUTPUT_DIR / "4 tauijt特征构造（结果）_来源.json"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+for required_path in (CLEANED_ORDER_FILE, INPUT_FILE):
+    if not required_path.is_file():
+        raise FileNotFoundError(f"缺少 tauijt 特征构造输入：{required_path}")
+
+if INPUT_FILE.stat().st_mtime < CLEANED_ORDER_FILE.stat().st_mtime:
+    raise RuntimeError(
+        "OD-15min面板早于最新异常订单清洗结果。请先重新运行数据清洗目录中的"
+        "‘2 OD-15min 聚合.py’、‘2_2 OD筛选不属于芝加哥的聚合数据.py’和"
+        "‘2_3 OD-15min聚合（补全时间、不管没出现的OD）.py’。"
+    )
 
 
 # ============================================================
@@ -161,129 +189,148 @@ def broadcast_daily_to_15min(daily_arr):
 
 
 def fill_by_fallback(target, fallback_list, global_mean):
-    """
-    对目标特征逐级填补：
-    先用同一OD长期特征，再用相似距离兜底特征，最后用全局均值。
-    """
-    out = target.copy()
+    """按给定顺序填补缺失值，最后使用全局均值。"""
 
-    for fb in fallback_list:
-        out = np.where(np.isnan(out), fb, out)
-
-    out = np.where(np.isnan(out), global_mean, out)
-
-    return out.astype("float32")
+    result = target.copy()
+    for fallback in fallback_list:
+        result = np.where(np.isnan(result), fallback, result)
+    return np.where(
+        np.isnan(result),
+        global_mean,
+        result,
+    ).astype("float32")
 
 
 # ============================================================
-# 5. 第一遍：快速计算相似距离兜底统计
-#    注意：这里用全月统计，速度快；严格时间切分实验时，应只用训练集统计。
+# 5. 计算相似距离兜底统计
 # ============================================================
 
 pf = pq.ParquetFile(INPUT_FILE)
 
 dist_slot_summary = []
 dist_summary = []
-
 global_tau_sum = 0.0
 global_order_count = 0.0
 
 for rg in range(pf.num_row_groups):
     chunk = pf.read_row_group(
         rg,
-        columns=["dist_ij", "slot_in_day", "D_ijt_observed", "tau_bar_ijt"]
+        columns=[
+            "dist_ij",
+            "slot_in_day",
+            "D_ijt_observed",
+            "tau_bar_ijt",
+        ],
     ).to_pandas()
 
-    chunk["dist_ij"] = pd.to_numeric(chunk["dist_ij"], errors="coerce")
-    chunk["slot_in_day"] = pd.to_numeric(chunk["slot_in_day"], errors="coerce").astype("int16")
-    chunk["D_ijt_observed"] = pd.to_numeric(chunk["D_ijt_observed"], errors="coerce").fillna(0)
-    chunk["tau_bar_ijt"] = pd.to_numeric(chunk["tau_bar_ijt"], errors="coerce")
+    chunk["dist_ij"] = pd.to_numeric(
+        chunk["dist_ij"],
+        errors="coerce",
+    )
+    chunk["slot_in_day"] = pd.to_numeric(
+        chunk["slot_in_day"],
+        errors="coerce",
+    ).astype("int16")
+    chunk["D_ijt_observed"] = pd.to_numeric(
+        chunk["D_ijt_observed"],
+        errors="coerce",
+    ).fillna(0)
+    chunk["tau_bar_ijt"] = pd.to_numeric(
+        chunk["tau_bar_ijt"],
+        errors="coerce",
+    )
 
-    valid = (chunk["D_ijt_observed"] > 0) & chunk["tau_bar_ijt"].notna()
+    valid = (
+        (chunk["D_ijt_observed"] > 0)
+        & chunk["tau_bar_ijt"].notna()
+    )
+    observed = chunk.loc[valid].copy()
 
-    obs = chunk.loc[valid].copy()
+    if not observed.empty:
+        observed["dist_bin_id"] = np.floor(
+            observed["dist_ij"] / DIST_BIN_WIDTH
+        ).astype("int32")
+        observed["tau_sum"] = (
+            observed["tau_bar_ijt"]
+            * observed["D_ijt_observed"]
+        )
 
-    if len(obs) > 0:
-        obs["dist_bin_id"] = np.floor(obs["dist_ij"] / DIST_BIN_WIDTH).astype("int32")
-        obs["tau_sum"] = obs["tau_bar_ijt"] * obs["D_ijt_observed"]
-
-        dist_slot = (
-            obs.groupby(["dist_bin_id", "slot_in_day"], as_index=False)
-            .agg(
+        dist_slot_summary.append(
+            observed.groupby(
+                ["dist_bin_id", "slot_in_day"],
+                as_index=False,
+            ).agg(
                 tau_sum=("tau_sum", "sum"),
                 order_count=("D_ijt_observed", "sum"),
             )
         )
-
-        dist_only = (
-            obs.groupby(["dist_bin_id"], as_index=False)
-            .agg(
+        dist_summary.append(
+            observed.groupby(
+                "dist_bin_id",
+                as_index=False,
+            ).agg(
                 tau_sum=("tau_sum", "sum"),
                 order_count=("D_ijt_observed", "sum"),
             )
         )
+        global_tau_sum += float(observed["tau_sum"].sum())
+        global_order_count += float(
+            observed["D_ijt_observed"].sum()
+        )
 
-        dist_slot_summary.append(dist_slot)
-        dist_summary.append(dist_only)
-
-        global_tau_sum += float(obs["tau_sum"].sum())
-        global_order_count += float(obs["D_ijt_observed"].sum())
-
-    print(f"第一遍兜底统计：row group {rg + 1}/{pf.num_row_groups}")
+    print(f"兜底统计：row group {rg + 1}/{pf.num_row_groups}")
 
 if global_order_count == 0:
-    raise ValueError("没有找到任何 tau_bar_ijt 非空且 D_ijt_observed > 0 的样本。")
+    raise ValueError("没有可用于计算服务时间统计的观测样本。")
 
 global_tau_mean = global_tau_sum / global_order_count
 
-dist_slot_all = pd.concat(dist_slot_summary, ignore_index=True)
-dist_slot_all = (
-    dist_slot_all.groupby(["dist_bin_id", "slot_in_day"], as_index=False)
-    .agg(
-        tau_sum=("tau_sum", "sum"),
-        order_count=("order_count", "sum"),
-    )
+dist_slot_all = pd.concat(
+    dist_slot_summary,
+    ignore_index=True,
+).groupby(
+    ["dist_bin_id", "slot_in_day"],
+    as_index=False,
+).agg(
+    tau_sum=("tau_sum", "sum"),
+    order_count=("order_count", "sum"),
 )
-
 dist_slot_all["global_tau_by_dist_slot"] = (
     dist_slot_all["tau_sum"] / dist_slot_all["order_count"]
 )
-
 dist_slot_all["dist_slot_key"] = (
     dist_slot_all["dist_bin_id"].astype("int64") * 100
     + dist_slot_all["slot_in_day"].astype("int64")
 )
-
 global_tau_by_dist_slot_map = pd.Series(
-    dist_slot_all["global_tau_by_dist_slot"].values,
-    index=dist_slot_all["dist_slot_key"].values
+    dist_slot_all["global_tau_by_dist_slot"].to_numpy(),
+    index=dist_slot_all["dist_slot_key"].to_numpy(),
 )
 
-dist_all = pd.concat(dist_summary, ignore_index=True)
-dist_all = (
-    dist_all.groupby(["dist_bin_id"], as_index=False)
-    .agg(
-        tau_sum=("tau_sum", "sum"),
-        order_count=("order_count", "sum"),
-    )
+dist_all = pd.concat(
+    dist_summary,
+    ignore_index=True,
+).groupby(
+    "dist_bin_id",
+    as_index=False,
+).agg(
+    tau_sum=("tau_sum", "sum"),
+    order_count=("order_count", "sum"),
 )
-
 dist_all["similar_OD_tau_mean"] = (
     dist_all["tau_sum"] / dist_all["order_count"]
 )
-
 similar_OD_tau_mean_map = pd.Series(
-    dist_all["similar_OD_tau_mean"].values,
-    index=dist_all["dist_bin_id"].values
+    dist_all["similar_OD_tau_mean"].to_numpy(),
+    index=dist_all["dist_bin_id"].to_numpy(),
 )
 
 
 # ============================================================
-# 6. 第二遍：按 row group 构造 tauijt 特征并写出
+# 6. 按 row group 构造 tauijt 特征并写出
 # ============================================================
 
-if os.path.exists(OUTPUT_FILE):
-    os.remove(OUTPUT_FILE)
+OUTPUT_FILE.unlink(missing_ok=True)
 
 writer = None
 total_rows = 0
@@ -393,17 +440,21 @@ for rg in range(pf.num_row_groups):
     # 6.6 相似距离兜底特征
     # --------------------------------------------------------
 
-    dist_bin_id = np.floor(df["dist_ij"].to_numpy(dtype="float32") / DIST_BIN_WIDTH).astype("int32")
+    dist_bin_id = np.floor(
+        df["dist_ij"].to_numpy(dtype="float32")
+        / DIST_BIN_WIDTH
+    ).astype("int32")
     slot_in_day = df["slot_in_day"].to_numpy(dtype="int32")
-
-    dist_slot_key = dist_bin_id.astype("int64") * 100 + slot_in_day.astype("int64")
+    dist_slot_key = (
+        dist_bin_id.astype("int64") * 100
+        + slot_in_day.astype("int64")
+    )
 
     global_tau_by_dist_slot = (
         pd.Series(dist_slot_key)
         .map(global_tau_by_dist_slot_map)
         .to_numpy(dtype="float32")
     )
-
     similar_OD_tau_mean = (
         pd.Series(dist_bin_id)
         .map(similar_OD_tau_mean_map)
@@ -413,20 +464,25 @@ for rg in range(pf.num_row_groups):
     global_tau_by_dist_slot = np.where(
         np.isnan(global_tau_by_dist_slot),
         global_tau_mean,
-        global_tau_by_dist_slot
+        global_tau_by_dist_slot,
     ).astype("float32")
-
     similar_OD_tau_mean = np.where(
         np.isnan(similar_OD_tau_mean),
         global_tau_mean,
-        similar_OD_tau_mean
+        similar_OD_tau_mean,
     ).astype("float32")
 
-    global_tau_by_dist_slot_m = global_tau_by_dist_slot.reshape(n_od, TIME_N)
-    similar_OD_tau_mean_m = similar_OD_tau_mean.reshape(n_od, TIME_N)
+    global_tau_by_dist_slot_m = global_tau_by_dist_slot.reshape(
+        n_od,
+        TIME_N,
+    )
+    similar_OD_tau_mean_m = similar_OD_tau_mean.reshape(
+        n_od,
+        TIME_N,
+    )
 
     # --------------------------------------------------------
-    # 6.7 构造同一 OD 历史缺失标记
+    # 6.7 标记同一 OD 的历史是否全部缺失
     # --------------------------------------------------------
 
     own_missing = (
@@ -442,7 +498,7 @@ for rg in range(pf.num_row_groups):
     ).astype("int8")
 
     # --------------------------------------------------------
-    # 6.8 对短期历史特征逐级填补
+    # 6.8 填补历史特征中的缺失值
     # --------------------------------------------------------
 
     fallback_list = [
@@ -453,23 +509,64 @@ for rg in range(pf.num_row_groups):
         similar_OD_tau_mean_m,
     ]
 
-    tau_ij_lag1 = fill_by_fallback(tau_ij_lag1, fallback_list, global_tau_mean)
-    tau_ij_lag2 = fill_by_fallback(tau_ij_lag2, fallback_list, global_tau_mean)
-    tau_ij_roll4_mean = fill_by_fallback(tau_ij_roll4_mean, fallback_list, global_tau_mean)
-    tau_ij_roll8_mean = fill_by_fallback(tau_ij_roll8_mean, fallback_list, global_tau_mean)
-    tau_ij_same_slot_last_day = fill_by_fallback(tau_ij_same_slot_last_day, fallback_list, global_tau_mean)
-    tau_ij_same_slot_last_week = fill_by_fallback(tau_ij_same_slot_last_week, fallback_list, global_tau_mean)
+    tau_ij_lag1 = fill_by_fallback(
+        tau_ij_lag1,
+        fallback_list,
+        global_tau_mean,
+    )
+    tau_ij_lag2 = fill_by_fallback(
+        tau_ij_lag2,
+        fallback_list,
+        global_tau_mean,
+    )
+    tau_ij_roll4_mean = fill_by_fallback(
+        tau_ij_roll4_mean,
+        fallback_list,
+        global_tau_mean,
+    )
+    tau_ij_roll8_mean = fill_by_fallback(
+        tau_ij_roll8_mean,
+        fallback_list,
+        global_tau_mean,
+    )
+    tau_ij_same_slot_last_day = fill_by_fallback(
+        tau_ij_same_slot_last_day,
+        fallback_list,
+        global_tau_mean,
+    )
+    tau_ij_same_slot_last_week = fill_by_fallback(
+        tau_ij_same_slot_last_week,
+        fallback_list,
+        global_tau_mean,
+    )
 
-    # 长期特征自身也补齐，避免输入出现缺失
-    tau_ij_mean_last_day = fill_by_fallback(tau_ij_mean_last_day, [global_tau_by_dist_slot_m, similar_OD_tau_mean_m], global_tau_mean)
-    tau_ij_median_last_day_proxy = fill_by_fallback(tau_ij_median_last_day_proxy, [global_tau_by_dist_slot_m, similar_OD_tau_mean_m], global_tau_mean)
-    tau_ij_mean_last3 = fill_by_fallback(tau_ij_mean_last3, [global_tau_by_dist_slot_m, similar_OD_tau_mean_m], global_tau_mean)
-    tau_ij_mean_last7 = fill_by_fallback(tau_ij_mean_last7, [global_tau_by_dist_slot_m, similar_OD_tau_mean_m], global_tau_mean)
-
-    tau_ij_count_last7 = np.where(
-        np.isnan(tau_ij_count_last7),
-        0.0,
-        tau_ij_count_last7
+    long_term_fallbacks = [
+        global_tau_by_dist_slot_m,
+        similar_OD_tau_mean_m,
+    ]
+    tau_ij_mean_last_day = fill_by_fallback(
+        tau_ij_mean_last_day,
+        long_term_fallbacks,
+        global_tau_mean,
+    )
+    tau_ij_median_last_day_proxy = fill_by_fallback(
+        tau_ij_median_last_day_proxy,
+        long_term_fallbacks,
+        global_tau_mean,
+    )
+    tau_ij_mean_last3 = fill_by_fallback(
+        tau_ij_mean_last3,
+        long_term_fallbacks,
+        global_tau_mean,
+    )
+    tau_ij_mean_last7 = fill_by_fallback(
+        tau_ij_mean_last7,
+        long_term_fallbacks,
+        global_tau_mean,
+    )
+    tau_ij_count_last7 = np.nan_to_num(
+        tau_ij_count_last7,
+        nan=0.0,
     ).astype("float32")
 
     # --------------------------------------------------------
@@ -515,7 +612,6 @@ for rg in range(pf.num_row_groups):
     result["od_tau_missing_flag"] = own_missing.reshape(-1)
     result["global_tau_by_dist_slot"] = global_tau_by_dist_slot
     result["similar_OD_tau_mean"] = similar_OD_tau_mean
-
     result["tau_ijt_label"] = tau_label.reshape(-1)
 
     # --------------------------------------------------------
@@ -568,7 +664,7 @@ for rg in range(pf.num_row_groups):
     total_trainable_rows += int(result["tau_ijt_label"].notna().sum())
 
     print(
-        f"第二遍特征构造：row group {rg + 1}/{pf.num_row_groups}；"
+        f"特征构造：row group {rg + 1}/{pf.num_row_groups}；"
         f"累计样本数：{total_rows}"
     )
 
@@ -588,3 +684,21 @@ print("输出文件：", OUTPUT_FILE)
 print("总样本数：", total_rows)
 print("tau_ijt_label 非空样本数：", total_trainable_rows)
 print("全局平均服务时间：", float(global_tau_mean))
+
+source_manifest = {
+    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+    "cleaned_order_file": str(CLEANED_ORDER_FILE),
+    "cleaned_order_mtime_ns": CLEANED_ORDER_FILE.stat().st_mtime_ns,
+    "od_panel_file": str(INPUT_FILE),
+    "od_panel_mtime_ns": INPUT_FILE.stat().st_mtime_ns,
+    "feature_file": str(OUTPUT_FILE),
+    "feature_mtime_ns": OUTPUT_FILE.stat().st_mtime_ns,
+    "total_rows": int(total_rows),
+    "trainable_label_rows": int(total_trainable_rows),
+    "global_tau_mean": float(global_tau_mean),
+}
+SOURCE_MANIFEST_FILE.write_text(
+    json.dumps(source_manifest, ensure_ascii=False, indent=2),
+    encoding="utf-8",
+)
+print("来源清单：", SOURCE_MANIFEST_FILE)
